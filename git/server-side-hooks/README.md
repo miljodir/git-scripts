@@ -1,7 +1,9 @@
 # Server Side Hooks
 
-A server side git hook is a script that can be run when something is being comitted.\n
-[Gits documentation on hooks](https://git-scm.com/book/en/v2/Customizing-Git-Git-Hooks)\n
+A server side git hook is a script that can be run when something is being comitted.
+
+[Gits documentation on hooks](https://git-scm.com/book/en/v2/Customizing-Git-Git-Hooks)
+
 [GitLabs documentation on hook creation](https://docs.gitlab.com/ce/administration/custom_hooks.html)
 
 ## Usage
