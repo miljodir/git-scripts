@@ -9,4 +9,5 @@ A server side git hook is a script that can be run when something is being comit
 ## Usage
 
 Scripts placed in this folder should have the name in form of `$hookType_$whatItDoes`, like for instance `pre-receive_print_friendly_message_on_commit`
+
 When using these scripts, place them were you need and rename them accordingly.
