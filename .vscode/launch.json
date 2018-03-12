@@ -1,0 +1,56 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+		{
+			"name": "Bash-Debug (hardcoded script name)",
+			"type": "bashdb",
+			"request": "launch",
+			"scriptPath": "${workspaceRoot}/agent_memo.sh",
+			"commandLineArguments": "",
+			"windows": {
+				"bashPath": "C:\\Windows\\sysnative\\bash.exe"
+			},
+			"linux": {
+				"bashPath": "bash"
+			},
+			"osx": {
+				"bashPath": "bash"
+			}
+		},
+		{
+			"name": "Bash-Debug (select script from list of sh files)",
+			"type": "bashdb",
+			"request": "launch",
+			"scriptPath": "${command:SelectScriptName}",
+			"commandLineArguments": "",
+			"windows": {
+				"bashPath": "C:\\Windows\\sysnative\\bash.exe"
+			},
+			"linux": {
+				"bashPath": "bash"
+			},
+			"osx": {
+				"bashPath": "bash"
+			}
+        },
+		{
+			"name": "Bash-Debug (type in script name)",
+			"type": "bashdb",
+			"request": "launch",
+			"scriptPath": "${workspaceRoot}/${command:AskForScriptName}",
+			"commandLineArguments": "",
+			"windows": {
+				"bashPath": "C:\\Windows\\sysnative\\bash.exe"
+			},
+			"linux": {
+				"bashPath": "bash"
+			},
+			"osx": {
+				"bashPath": "bash"
+			}
+        }
+	]
+}
