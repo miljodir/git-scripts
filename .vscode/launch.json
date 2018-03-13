@@ -8,8 +8,8 @@
 			"name": "Bash-Debug (hardcoded script name)",
 			"type": "bashdb",
 			"request": "launch",
-			"scriptPath": "${workspaceRoot}/agent_memo.sh",
-			"commandLineArguments": "",
+			"scriptPath": "/home/stoo/Gitlab/script/sync.sh",
+			"commandLineArguments": "-a",
 			"windows": {
 				"bashPath": "C:\\Windows\\sysnative\\bash.exe"
 			},
@@ -25,7 +25,7 @@
 			"type": "bashdb",
 			"request": "launch",
 			"scriptPath": "${command:SelectScriptName}",
-			"commandLineArguments": "",
+			"commandLineArguments": "-f fil1 minfil",
 			"windows": {
 				"bashPath": "C:\\Windows\\sysnative\\bash.exe"
 			},
