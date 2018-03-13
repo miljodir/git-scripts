@@ -19,13 +19,20 @@
 #      REVISION:  ---
 #===============================================================================
 PROGRAMNAME=$(basename $0)
-cd /home/stoo/Gitlab/script/
-#cd $(dirname $0)
-# SDPSOFT_REMOTE_DIR="/prog/sdpsoft/"
-SDPSOFT_REMOTE_DIR="/private/stoo/syncTest/"
+cd $(dirname $0)
+SDPSOFT_REMOTE_DIR="/prog/sdpsoft/"
 SERVERS=(
-  root@test01.dev.sdp.statoil.no
-  #st-vcris01.st.statoil.no
+    tr-vsdp02.tr.statoil.no
+    st-vcris01.st.statoil.no
+    be-linrgsn002.be.statoil.no
+    hou-linrgsn034.hou.statoil.no
+    rio-linrgsn003.rio.statoil.no
+    cal-linrgsn009.cal.statoil.no
+    stjohn-linrgs006.stjohn.statoil.no
+    ha-linrgsn050.ha.statoil.no
+    st-lcmtop01.st.statoil.no
+    hou-lcctop01.hou.statoil.no
+    ffs01.hou.statoil.no
 )
 
 # Print usage info if none or an invalid argument is given.
@@ -63,4 +70,3 @@ elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
 else
     usage
 fi
-
