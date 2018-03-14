@@ -8,7 +8,7 @@
 			"name": "Bash-Debug (hardcoded script name)",
 			"type": "bashdb",
 			"request": "launch",
-			"scriptPath": "${workspaceRoot}/agent_memo.sh",
+			"scriptPath": "/home/stoo/Gitlab/script/sdpsoft_sync.sh",
 			"commandLineArguments": "",
 			"windows": {
 				"bashPath": "C:\\Windows\\sysnative\\bash.exe"
