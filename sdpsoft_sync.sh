@@ -41,7 +41,6 @@ function usage {
     echo -e "      -f, --files           Only sync these files. Example: \"./$PROGRAMNAME --files python2.7.14 tmux-*\""
     echo "      -a, --all             Sync all files"
     echo "      --only-env-files      Only sync the 'env.sh' and 'env.csh' files"
-    exit 1
 }
 
 if [ "$1" = "--only-env-files" ]; then
@@ -70,10 +69,12 @@ elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
         echo "----------------------------------------------"
         echo " SYNCING to $server"
         for file in "$@"; do
-            rsync -va $file $server:$SDPSOFT_REMOTE_DIR
+            rsync -va --delete --exclude-from=".gitignore" $file $server:$SDPSOFT_REMOTE_DIR
         done
     done
 else
     echo "Error: Requires atleast one argument."
     usage
+    exit 1
 fi
+exit 0
