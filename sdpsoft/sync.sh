@@ -1,22 +1,13 @@
 #!/usr/bin/env bash
 #===============================================================================
-#
 #          FILE:  sync.sh
-#
 #         USAGE:  sync.sh [-a, --all] [-f, --files] [--only-env-files]"
-#
 #   DESCRIPTION:  Uses rsync to push and syncronize local sdpsoft directory
 #                 to all remote RGS Statoil servers.
-#
 #       OPTIONS:  -a --all -f --files --only-env-files
 #  REQUIREMENTS:  run as spdadm on vmm03.prod.sdp.ststoil.no in /data/sdpsoft
-#          BUGS:  ---
-#         NOTES:  ---
 #        AUTHOR:  Stig O. M. Ofstad, stoo@statoil.com
-#       COMPANY:  Statoil
-#       VERSION:  1.0
 #       CREATED:  ti. 13. mars 12:32:27 +0100 2018
-#      REVISION:  ---
 #===============================================================================
 PROGRAMNAME=$(basename $0)
 cd $(dirname $0)
@@ -51,7 +42,7 @@ if [ "$1" = "--only-env-files" ]; then
     for server in ${SERVERS[@]}; do
         echo "----------------------------------------------"
         echo " SYNCING to $server"
-        rsync -va --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
     done
 elif [ "$1" = "-a" ] || [ "$1" = "--all" ]; then
     for server in ${SERVERS[@]}; do
@@ -59,8 +50,8 @@ elif [ "$1" = "-a" ] || [ "$1" = "--all" ]; then
         echo " SYNCING to $server"
         # Sync the updated environment-files last to avoid putting the updated
         # software in limbo while the new version is syncing
-        rsync -va --delete --exclude-from=".gitignore" --exclude="env.sh" --exclude="env.csh" . $server:$SDPSOFT_REMOTE_DIR
-        rsync -va --delete --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --delete --exclude-from=".gitignore" --exclude="env.sh" --exclude="env.csh" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --delete --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
     done
 elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
     # Shift the $@ parameters. $2 becomes $1. To omit '--files'.
@@ -69,7 +60,7 @@ elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
         echo "----------------------------------------------"
         echo " SYNCING to $server"
         for file in "$@"; do
-            rsync -va --delete --exclude-from=".gitignore" $file $server:$SDPSOFT_REMOTE_DIR
+            rsync -vah --delete --exclude-from=".gitignore" $file $server:$SDPSOFT_REMOTE_DIR
         done
     done
 else
