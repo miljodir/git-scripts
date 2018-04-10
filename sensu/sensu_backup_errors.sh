@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Script meant to be run as a sensu check. Returns status of last backup job 
 LOG_PATH="/tmp/"
-LOG_PREFIX="backup_report_error_"
+LOG_PREFIX="backup_report_"
 TIMESTAMP=$(date +\%y.\%m.\%d_) 
 BACKUP_LOG="$LOG_PATH$LOG_PREFIX$TIMESTAMP*.log"
 # This is perhaps not the best way to do it. An alternative could be to
