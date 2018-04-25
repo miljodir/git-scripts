@@ -20,12 +20,12 @@ fi
 # If the logfile containes "error", echo the error line with context, and exit with code 2
 if grep -i --quiet "error" $BACKUP_LOG; then
     echo "The backup job completet with error(s)! Error with context:"
-    grep -i --color=auto --before-context=2 --after-context=1 "error" $BACKUP_LOG
+    grep -i --color=auto --max-count 1 --before-context=2 --after-context=1 "error" $BACKUP_LOG
     exit 2
 # Same as above, just with "warning" and exit code 1
 elif grep -i --quiet "warning" $BACKUP_LOG; then
     echo "The backup job completet with warning(s)! Warning with context:"
-    grep -i --before-context=1 --after-context=1 "warning" $BACKUP_LOG
+    grep -i --before-context=1 --max-count 1 --after-context=1 "warning" $BACKUP_LOG
     exit 1
 else
     echo "Could not locate the keywords 'warning' or 'error' in the last backup report. Status OK."
