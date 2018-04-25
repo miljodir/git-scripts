@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Uses the Elasticsearh API to close and delete Indices
-# Must be run on the ES host
+# Must be run on the Elasticsearch host
 # Does not perform action on 'indices older than', but on 'indices created in the month 
 # n-months ago'
 ELK_ENDPOINT="localhost:9200/"
