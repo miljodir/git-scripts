@@ -29,7 +29,7 @@ SERVERS=(
 # Print usage info if none or an invalid argument is given.
 function usage {
     echo "usage: $PROGRAMNAME [-a, --all] [-f, --files] [--only-env-files]"
-    echo -e "      -f, --files           Only sync these files. Example: \"./$PROGRAMNAME --files python2.7.14 tmux-*\""
+    echo -e "      -f, --files          Only sync these files. Example: \"./$PROGRAMNAME --files python2.7.14 tmux-*\""
     echo "      -a, --all             Sync all files"
     echo "      --only-env-files      Only sync the 'env.sh' and 'env.csh' files"
 }
