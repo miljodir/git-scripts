@@ -69,7 +69,7 @@ elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
         echo "----------------------------------------------"
         echo " SYNCING to $server"
         for file in "$@"; do
-            rsync -vah --delete --exclude-from=".gitignore" $file $server:$SDPSOFT_REMOTE_DIR
+            rsync -vah --delete --exclude-from=".gitignore" ${file%%+(/)} $server:$SDPSOFT_REMOTE_DIR
         done
     done
 else
