@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
 #===============================================================================
+#
 #          FILE:  sync.sh
+#
 #         USAGE:  sync.sh [-a, --all] [-f, --files] [--only-env-files]"
+#
 #   DESCRIPTION:  Uses rsync to push and syncronize local sdpsoft directory
 #                 to all remote RGS Statoil servers.
+#
 #       OPTIONS:  -a --all -f --files --only-env-files
 #  REQUIREMENTS:  run as spdadm on vmm03.prod.sdp.ststoil.no in /data/sdpsoft
+#          BUGS:  ---
+#         NOTES:  ---
 #        AUTHOR:  Stig O. M. Ofstad, stoo@statoil.com
+#       COMPANY:  Statoil
+#       VERSION:  1.0
 #       CREATED:  ti. 13. mars 12:32:27 +0100 2018
+#      REVISION:  1
 #===============================================================================
 PROGRAMNAME=$(basename $0)
 cd $(dirname $0)
 SDPSOFT_REMOTE_DIR="/prog/sdpsoft/"
 SERVERS=(
-    tr-vsdp02.tr.statoil.no
-    st-vcris01.st.statoil.no
-    be-linrgsn002.be.statoil.no
+    be-linrgsn097.be.statoil.no
+    tr-linrgsn019.tr.statoil.no
+    st-linrgs236.st.statoil.no
     hou-linrgsn034.hou.statoil.no
     rio-linrgsn003.rio.statoil.no
     cal-linrgsn009.cal.statoil.no
@@ -29,7 +38,7 @@ SERVERS=(
 # Print usage info if none or an invalid argument is given.
 function usage {
     echo "usage: $PROGRAMNAME [-a, --all] [-f, --files] [--only-env-files]"
-    echo -e "      -f, --files          Only sync these files. Example: \"./$PROGRAMNAME --files python2.7.14 tmux-*\""
+    echo -e "      -f, --files        Only sync these files. Example: \"./$PROGRAMNAME --files python2.7.14 tmux-*\""
     echo "      -a, --all             Sync all files"
     echo "      --only-env-files      Only sync the 'env.sh' and 'env.csh' files"
 }
@@ -69,3 +78,4 @@ else
     exit 1
 fi
 exit 0
+

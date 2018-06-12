@@ -70,7 +70,10 @@ function sdpsoft_menu() {
   printf "      - Email: gm_sds_rdi@statoil.com\n"
   printf "\n"
 }
+# Function to standardise messages outputed by SDPSoft
 function sdpsoft_message() {
+    # $1 represents the actual message
+    # $2 represents the severity level of the message
     message=$1
     message_type=$2
     if [ "$message_type" = "error" ]; then
@@ -83,8 +86,15 @@ function sdpsoft_message() {
     printf "\n$message\n\n"
     printf "${COLOR_NONE}"
 }
+# SDPSofts search function, simply inspecting the SDPSoft path for the string inputed
 function sdpsoft_search() {
     search_term=$1
+    # software_in_sdpsoft equal to the search string inputed, here is an explaination of the pipes
+    # find - in SDPSoft directory, only one level down (meaning sdpsoft root), only folders for an case-insensitive wildcards string match
+    # sort - ignore case and use 'version-sort'
+    # cut  - away the leading SDPSoft path extractiv only the name of the software that was searched for
+    # grep - away any hidden folders
+    # grep - for only strings that have 'valid' characters in them
     software_in_sdpsoft=$(find $SDPSOFT_PATH -maxdepth 1 -type d -iname "*$search_term*" | sort -fV | cut -d"/" -f4- | grep -v "^\." | grep "[a-zA-Z0-9\_\-].*[0-9].*")
     if [ "$software_in_sdpsoft" != "" ]; then
         sdpsoft_message "Search results:"
@@ -96,6 +106,7 @@ function sdpsoft_search() {
         sdpsoft_message "Unable to find ${TEXT_UNDERLINE}$search_term${TEXT_NO_UNDERLINE} in SDPSoft" warning
     fi
 }
+# When updating PATH, LD_LIBRARY_PATH etc, we need to know what character that separates the software name from the version
 function find_version_separator() {
     software_path_base=$1
     requested_version=$2
@@ -110,10 +121,14 @@ function find_version_separator() {
 
 function find_and_source() {
     requested_version=$1
+    # Sorry for thorny syntax, it's a way of declaring an array
     declare -a available_versions=("${!2}")
     software_name=$3
 
+    # If the user requestes the get the "latest" version, then some logic is needed to find the last version
+    # It boils down to pick the last array element in $available_versions
     if [ "$requested_version" = "latest" ]; then
+        # How this logic is implemented depends on which version of bash you have
         bash_version_major=$(echo $BASH_VERSION | cut -d"." -f1)
         bash_version_minor=$(echo $BASH_VERSION | cut -d"." -f2)
         # for bash versions above 4, always use newer method of setting requested_version
@@ -132,10 +147,14 @@ function find_and_source() {
     fi
 
     for version in ${available_versions[@]}; do
+        
         if [ "$version" == "$requested_version" ]; then
+            # Find the separator between the software name and the version
             separator=$(find_version_separator "$SDPSOFT_PATH/$software_name" $requested_version)
+            # software_path is the absolute path to the requestes software
             software_path="$SDPSOFT_PATH/${software_name}${separator}${requested_version}"
 
+            # The following if's looks for certain folder and updates paths accordingly
             if [ -d "$software_path/bin" ]; then
                 export PATH="$software_path/bin:$PATH"
             fi
@@ -203,11 +222,14 @@ function find_and_source() {
                 fi
             fi
 
+            # If SILENT_OUTPUT is unset or empty
             if [ -z "$SILENT_OUTPUT" ]; then
                 printf "${COLOR_GREEN}"
                 printf "$software_name: $requested_version\n"
                 printf "${COLOR_NONE}"
             fi
+           
+            # Logging of software usage
             timestamp=$(date -u +"%F_%H:%M:%S")
             # Using sed -i causes a problem with writing temporary sed-file to /prog/sdpsoft
             # which normal users do not have access to, resulting in failed Jenkins builds etc..
@@ -216,9 +238,12 @@ function find_and_source() {
             temp=$(sed "/^${software_name}${separator}${requested_version}@/d" $SDPSOFT_PATH/.software.log)
             echo $temp | tr " " "\n" > $SDPSOFT_PATH/.software.log
             echo "${software_name}${separator}${requested_version}@$timestamp" >> $SDPSOFT_PATH/.software.log
+
+            # Returning 0 here will exit this function
             return 0
         fi
     done
+    # If no version were found, then print all the available versions for the software requested
     printf "${COLOR_YELLOW}"
     printf "$software_name: $requested_version not found!\n"
     printf "Available versions for $software_name:\n"
@@ -277,6 +302,12 @@ else
     fi
     
       ################# LEGACY STUFF END ##############################
+
+    # The following if's is just a simple check to look for what software the user requested
+    # Most of the software are so generic that they can use the find_and_source function
+    # but there are some edge cases that needs to be treated differently, e.g. madagascar
+    # Knowing if some software needs special treatment is something you could find in the software docs
+    # or if the software have some special sourcing mechanisms
     
     if [ -n "$ARPACK_NG_VERSION" ]; then
         ARPACK_NG_VERSIONS=(
@@ -611,6 +642,7 @@ else
     if [ -n "$LIBECL_VERSION" ]; then
         LIBECL_VERSIONS=(
             "2.3.a2"
+            "2.3.a5"
         )
         find_and_source $LIBECL_VERSION LIBECL_VERSIONS[@] libecl
     fi
@@ -852,6 +884,7 @@ else
             "2.7.11"
             "2.7.13"
             "2.7.14"
+            "2.7.15"
             "3.3.2"
             "3.4.2"
             "3.6.1"
@@ -882,6 +915,7 @@ else
              "4.6.2"
              "4.7.1"
              "4.8.4"
+             "4.8.6"
              "5.4.2"
              "5.9.1"
         )

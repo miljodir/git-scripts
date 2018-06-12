@@ -486,7 +486,7 @@ else
   endif
 
   if ( "$?LIBECL_VERSION" ) then
-    set LIBECL_VERSIONS={"2.3.a2"}
+    set LIBECL_VERSIONS={"2.3.a2", "2.3.a5"}
     source $SDPSOFT_PATH/env.csh --source $LIBECL_VERSION "$LIBECL_VERSIONS" libecl $SILENT_OUTPUT
   endif
 
@@ -662,7 +662,7 @@ else
   endif
 
   if ( "$?PYTHON_VERSION" ) then
-    set PYTHON_VERSIONS={"2.4","2.6","2.6.7","2.7.3","2.7.6","2.7.11","2.7.13","2.7.14","3.3.2","3.4.2","3.6.1","3.6.2","3.6.4"}
+    set PYTHON_VERSIONS={"2.4","2.6","2.6.7","2.7.3","2.7.6","2.7.11","2.7.13","2.7.14","2.7.15","3.3.2","3.4.2","3.6.1","3.6.2","3.6.4"}
     source $SDPSOFT_PATH/env.csh --source $PYTHON_VERSION "$PYTHON_VERSIONS" python $SILENT_OUTPUT
   endif
 
@@ -677,7 +677,7 @@ else
   endif
 
   if ( "$?QT_VERSION" ) then
-    set QT_VERSIONS={"3.3.5","4.6","4.6.2","4.7.1","4.8.4","5.4.2","5.9.1"}
+    set QT_VERSIONS={"3.3.5","4.6","4.6.2","4.7.1","4.8.4","4.8.6","5.4.2","5.9.1"}
     source $SDPSOFT_PATH/env.csh --source $QT_VERSION "$QT_VERSIONS" qt-x11 $SILENT_OUTPUT
       if ( "$?" == "0" ) then
         if ( -d "${SDPSOFT_PATH}/qt-x11_${QT_VERSION}" ) then
