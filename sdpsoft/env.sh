@@ -771,6 +771,7 @@ else
     if [ -n "$NODE_VERSION" ]; then
         NODE_VERSIONS=(
             "0.10.12"
+            "8.11.2"
         )
         find_and_source $NODE_VERSION NODE_VERSIONS[@] node
     fi
