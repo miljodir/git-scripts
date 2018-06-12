@@ -59,8 +59,8 @@ elif [ "$1" = "-a" ] || [ "$1" = "--all" ]; then
         echo " SYNCING to $server"
         # Sync the updated environment-files last to avoid putting the updated
         # software in limbo while the new version is syncing
-        rsync -vah --delete --exclude-from=".gitignore" --exclude="env.sh" --exclude="env.csh" . $server:$SDPSOFT_REMOTE_DIR
-        rsync -vah --delete --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --delete --max-delete=20 --exclude-from=".gitignore" --exclude="env.sh" --exclude="env.csh" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --delete --max-delete=20 --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
     done
 elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
     # Shift the $@ parameters. $2 becomes $1. To omit '--files'.
@@ -69,7 +69,7 @@ elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
         echo "----------------------------------------------"
         echo " SYNCING to $server"
         for file in "$@"; do
-            rsync -vah --delete --exclude-from=".gitignore" ${file%%+(/)} $server:$SDPSOFT_REMOTE_DIR
+            rsync -vah --delete --max-delete=20 --exclude-from=".gitignore" ${file%%+(/)} $server:$SDPSOFT_REMOTE_DIR
         done
     done
 else
