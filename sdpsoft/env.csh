@@ -582,7 +582,7 @@ else
   endif
 
   if ( "$?NODE_VERSION" ) then
-    set NODE_VERSIONS={"0.10.12","8.11.2"}
+    set NODE_VERSIONS={"0.10.12","8.11.2","8.11.3"}
     source $SDPSOFT_PATH/env.csh --source $NODE_VERSION "$NODE_VERSIONS" node $SILENT_OUTPUT
   endif
 
