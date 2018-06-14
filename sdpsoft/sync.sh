@@ -50,7 +50,7 @@ for i in "$@" ; do
         SERVERS=(test01.dev.sdp.statoil.no)
         echo "Test flag detected. Using $SERVERS as the only target for this run."
         # Delete the '--test' flag from the input parameters
-        for arg do
+        for arg in "$@" ; do
             shift
             [ "$arg" = "--test" ] && continue
             set -- "$@" "$arg"
@@ -66,7 +66,7 @@ if [ "$1" = "--only-env-files" ]; then
     for server in ${SERVERS[@]}; do
         echo "----------------------------------------------"
         echo " SYNCING to $server"
-        rsync -vah --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --include="/env.sh" --include="/env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
     done
 elif [ "$1" = "-a" ] || [ "$1" = "--all" ]; then
     for server in ${SERVERS[@]}; do
@@ -74,8 +74,8 @@ elif [ "$1" = "-a" ] || [ "$1" = "--all" ]; then
         echo " SYNCING to $server"
         # Sync the updated environment-files last to avoid putting the updated
         # software in limbo while the new version is syncing
-        rsync -vah --delete --max-delete=20 --exclude-from=".gitignore" --exclude="env.sh" --exclude="env.csh" . $server:$SDPSOFT_REMOTE_DIR
-        rsync -vah --delete --max-delete=20 --include="env.sh" --include="env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --delete --max-delete=20 --exclude-from=".gitignore" --exclude="/env.sh" --exclude="/env.csh" . $server:$SDPSOFT_REMOTE_DIR
+        rsync -vah --delete --max-delete=20 --include="/env.sh" --include="/env.csh" --exclude="*" . $server:$SDPSOFT_REMOTE_DIR
     done
 elif [ "$1" = "-f" ] || [ "$1" = "--files" ]; then
     # Shift the $@ parameters. $2 becomes $1. To ommit '--files'.
