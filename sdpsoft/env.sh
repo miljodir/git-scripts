@@ -920,6 +920,8 @@ else
              "4.8.6"
              "5.4.2"
              "5.9.1"
+             "5.9.6"
+             "5.11.1"
         )
         find_and_source $QT_VERSION QT_VERSIONS[@] qt-x11
           if [ "$?" == "0" ]; then

@@ -677,7 +677,7 @@ else
   endif
 
   if ( "$?QT_VERSION" ) then
-    set QT_VERSIONS={"3.3.5","4.6","4.6.2","4.7.1","4.8.4","4.8.6","5.4.2","5.9.1"}
+    set QT_VERSIONS={"3.3.5","4.6","4.6.2","4.7.1","4.8.4","4.8.6","5.4.2","5.9.1","5.9.6","5.11.1"}
     source $SDPSOFT_PATH/env.csh --source $QT_VERSION "$QT_VERSIONS" qt-x11 $SILENT_OUTPUT
       if ( "$?" == "0" ) then
         if ( -d "${SDPSOFT_PATH}/qt-x11_${QT_VERSION}" ) then
