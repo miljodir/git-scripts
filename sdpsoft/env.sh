@@ -936,7 +936,7 @@ else
             "1.9.3"
             "2.0.0"
         )
-        find_and_source $RUBY_VERSION ruby_VERSIONS[@] ruby
+        find_and_source $RUBY_VERSION RUBY_VERSIONS[@] ruby
           if [ "$?" == "0" ]; then
               separator=$(find_version_separator "$SDPSOFT_PATH/ruby" $RUBY_VERSION)
               export GEM_HOME="$SDPSOFT_PATH/ruby${separator}${RUBY_VERSION}/lib/ruby/gems/$RUBY_VERSION"
