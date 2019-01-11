@@ -747,6 +747,7 @@ else
   if ( "$?SU_VERSION" ) then
     set SU_VERSIONS={"40","42","43_R3","43_R6"}
     source $SDPSOFT_PATH/env.csh --source $SU_VERSION "$SU_VERSIONS" SU $SILENT_OUTPUT
+    setenv CWPROOT "$SDPSOFT_PATH/SU_$SU_VERSION/"
   endif
 
   if ( "$?SVFTOOLS_VERSION" ) then
