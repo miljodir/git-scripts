@@ -256,7 +256,6 @@ function find_and_source() {
 
 if [ "$1" = "help" -o "$1" = "--help" -o "$1" = "-h" -o "$1" = "menu" -o "$1" = "--menu" ]; then
     sdpsoft_menu
-    return 0
 elif [ "$1" = "--search" ]; then
     if [ "$2" = "" ]; then
         sdpsoft_message "No search term defined! Please define a search term" warning
@@ -1013,6 +1012,7 @@ else
             "43_R6"
         )
         find_and_source $SU_VERSION SU_VERSIONS[@] SU
+        export CWPROOT=$SDPSOFT_PATH/SU_$SU_VERSION/
     fi
     
     if [ -n "$SVFTOOLS_VERSION" ]; then
