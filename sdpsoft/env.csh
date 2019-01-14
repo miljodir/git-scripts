@@ -662,7 +662,7 @@ else
   endif
 
   if ( "$?PYTHON_VERSION" ) then
-    set PYTHON_VERSIONS={"2.4","2.6","2.6.7","2.7.3","2.7.6","2.7.11","2.7.13","2.7.14","2.7.15","3.3.2","3.4.2","3.6.1","3.6.2","3.6.4"}
+    set PYTHON_VERSIONS={"2.4","2.6","2.6.7","2.7.3","2.7.6","2.7.11","2.7.13","2.7.14","2.7.15","3.3.2","3.4.2","3.6.1","3.6.2","3.6.4","3.7.1"}
     source $SDPSOFT_PATH/env.csh --source $PYTHON_VERSION "$PYTHON_VERSIONS" python $SILENT_OUTPUT
   endif
 

@@ -891,6 +891,7 @@ else
             "3.6.1"
             "3.6.2"
             "3.6.4"
+            "3.7.1"
         )
         find_and_source $PYTHON_VERSION PYTHON_VERSIONS[@] python
     fi
