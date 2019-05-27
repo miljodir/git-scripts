@@ -32,6 +32,7 @@ SERVERS=(
     cal-linrgsn009.cal.statoil.no
     stjohn-linrgs006.stjohn.statoil.no
     hou-lcctop01.hou.statoil.no
+    gfs01.hou.statoil.no
 )
 
 # Print usage info if none or an invalid argument is given.
