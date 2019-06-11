@@ -1,4 +1,4 @@
-#!/usr/bin/env csh 
+#!/usr/bin/env csh
 
 # Color and text manipulation variables
 # Using these colors causes some issues with the terminal. We've gotten complaints, nulling them out
@@ -120,7 +120,7 @@ else if ( "$1" == "--source" ) then
             set separator="-"
         else if ( -d "${SDPSOFT_PATH}/${software_name}${requested_version}" ) then
             set separator=""
-        else 
+        else
             set separator="-"
         endif
 
@@ -233,7 +233,7 @@ else
 
   if ( "$1" == "--silent" ) then
     set SILENT_OUTPUT=True
-  else 
+  else
     set SILENT_OUTPUT=False
   endif
   ################# LEGACY STUFF START ##############################
@@ -592,7 +592,7 @@ else
   endif
 
   if ( "$?OPENBLAS_VERSION" ) then
-    set OPENBLAS_VERSIONS={"0.2.14"}
+    set OPENBLAS_VERSIONS={"0.2.14", "0.3.6"}
     source $SDPSOFT_PATH/env.csh --source $OPENBLAS_VERSION "$OPENBLAS_VERSIONS" openblas $SILENT_OUTPUT
   endif
 
@@ -607,7 +607,7 @@ else
       else if ( -d "${SDPSOFT_PATH}/openmpi${OPENMPI_VERSION}" ) then
         setenv MPI "${SDPSOFT_PATH}/openmpi$OPENMPI_VERSION"
       endif
-      if ( "$?FPATH" ) then  
+      if ( "$?FPATH" ) then
         setenv FPATH "$MPI/include:$FPATH"
       else
         setenv FPATH "$MPI/include"
@@ -788,6 +788,11 @@ else
   if ( "$?ZEROMQ_VERSION" ) then
     set ZEROMQ_VERSIONS={"4.2.1"}
     source $SDPSOFT_PATH/env.csh --source $ZEROMQ_VERSION "$ZEROMQ_VERSIONS" zeromq $SILENT_OUTPUT
+  endif
+
+  if ( "$?GRPC_VERSION" ) then
+    set GRPC_VERSIONS={"1.20.1"}
+    source $SDPSOFT_PATH/env.csh --source $GRPC_VERSION "$GRPC_VERSIONS" grpc $SILENT_OUTPUT
   endif
 
 endif
