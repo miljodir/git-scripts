@@ -1077,7 +1077,7 @@ else
         GRPC_VERSIONS=(
             "1.20.1"
         )
-        find_and_source $GRPC_VERSION GRPC[@] grpc
+        find_and_source $GRPC_VERSION GRPC_VERSIONS[@] grpc
     fi
 
     if [ -n "$ZEROMQ_VERSION" ]; then
