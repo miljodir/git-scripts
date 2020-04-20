@@ -13,8 +13,9 @@
 # ----------------------------------------------------------------------------------
 
 # Requirements:
-# Powershell
+# Powershell 7.0 or newer
 # Az module: Install-Module Az
+# Activate PIM role "Omnia contributor" is needed to activate JiT. Per April 2020 this is not available in powershell 7.x, port from 5.x might come
 
 <#
 .SYNOPSIS
@@ -27,27 +28,42 @@ function Connect-AzVM()
         [Parameter(Mandatory=$true, ParameterSetName="Default", Position=0)]
         [string] $VMName,
         [Parameter(Mandatory=$false, ParameterSetName="Default", Position=1)]
-        [string] $RGType
+        [string] $RGType,
+        [Parameter(Mandatory=$false, ParameterSetName="Default", Position=2)]
+        [switch] $Fast
 
     )
 
+    $RGType = "external"
+    $RGName = "sdp-$RGType-vms"
+
+    if (!$fast) { # Use -Fast switch to skip JiT and waiting
 
     Set-AzContext -Subscription "S066-SDP-Tools-Classic"
 
-    $RGType = "internal"
-    $RGName = "sdp-$RGType-vms"
+    Import-Module Az.Resources
+
+    $localIP = Get-NetIPAddress | Select-Object -Property IPAddress | Where-Object -Property IPAddress -Like "10.*"
 
 	[Microsoft.Azure.Commands.Security.Models.JitNetworkAccessPolicies.PSSecurityJitNetworkAccessPolicyInitiateVirtualMachine]$vm = New-Object -TypeName Microsoft.Azure.Commands.Security.Models.JitNetworkAccessPolicies.PSSecurityJitNetworkAccessPolicyInitiateVirtualMachine
-	$vm.Id = "/subscriptions/47dd9472-aaea-401b-add5-55fccfe63434/resourceGroups/sdp-external-vms/providers/Microsoft.Compute/virtualMachines/$vmName"
+	$vm.Id = "/subscriptions/47dd9472-aaea-401b-add5-55fccfe63434/resourceGroups/$RGName/providers/Microsoft.Compute/virtualMachines/$VMName"
 	[Microsoft.Azure.Commands.Security.Models.JitNetworkAccessPolicies.PSSecurityJitNetworkAccessPolicyInitiatePort]$port = New-Object -TypeName Microsoft.Azure.Commands.Security.Models.JitNetworkAccessPolicies.PSSecurityJitNetworkAccessPolicyInitiatePort
-	$port.AllowedSourceAddressPrefix = "127.0.0.1"
+	$port.AllowedSourceAddressPrefix = $localIP
 	$port.EndTimeUtc = [DateTime]::UtcNow.AddHours(2)
 	$port.Number = 22
 	$vm.Ports = (,$port)
 
     Start-AzJitNetworkAccessPolicy -ResourceGroupName $RGName -Location "norwayeast" -Name "OP-VMs-JIT-Policy" -VirtualMachine (,$vm)
 
-    ssh root@"$vmName".sdp.equinor.com
+    if ($?) {
+        Write-Host "Successfully sent JiT request, now waiting 30 secs before connecting as the port opening takes some time ..."
+    }
+    Start-Sleep 30
+
+}
+    ssh -i $HOME/.ssh/id_rsa root@"$vmName".sdp.equinor.com
 }
 
-
+# Recommended: Add the above to powershell profile at $PROFILE. Alternatively you can figure out how to run it from a bash/zsh context. "pwsh ./Connect-AzVM -vmname vm31" might work
+# Regular Example: Connect-AzVM -rgtype internal -VMName $VMName (rgtype is optional, default external)
+# Per 20/04/2020 only vm32 requires JiT. This will likely be subject to change.
