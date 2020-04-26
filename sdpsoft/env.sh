@@ -816,6 +816,7 @@ else
             "1.0.2l"
             "1.1.0f"
             "1.1.1d"
+            "1.1.1"
         )
         find_and_source $OPENSSL_VERSION OPENSSL_VERSIONS[@] openssl
     fi
