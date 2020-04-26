@@ -370,6 +370,7 @@ else
     if [ -n "$CMAKE_VERSION" ]; then
         CMAKE_VERSIONS=(
              "3.10.2"
+             "3.16.0"
         )
         find_and_source $CMAKE_VERSION CMAKE_VERSIONS[@] cmake
     fi
@@ -814,6 +815,7 @@ else
         OPENSSL_VERSIONS=(
             "1.0.2l"
             "1.1.0f"
+            "1.1.1d"
         )
         find_and_source $OPENSSL_VERSION OPENSSL_VERSIONS[@] openssl
     fi
