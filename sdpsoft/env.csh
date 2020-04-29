@@ -312,7 +312,7 @@ else
   endif
 
   if ( "$?CMAKE_VERSION" ) then
-    set CMAKE_VERSIONS={"3.10.2"}
+    set CMAKE_VERSIONS={"3.10.2", "3.16.0"}
     source $SDPSOFT_PATH/env.csh --source $CMAKE_VERSION "$CMAKE_VERSIONS" cmake $SILENT_OUTPUT
   endif
 
@@ -617,7 +617,7 @@ else
   endif
 
   if ( "$?OPENSSL_VERSION" ) then
-    set OPENSSL_VERSIONS={"1.0.2l","1.1.0f"}
+    set OPENSSL_VERSIONS={"1.0.2l","1.1.0f", "1.1.1d", "1.1.1"}
     source $SDPSOFT_PATH/env.csh --source $OPENSSL_VERSION "$OPENSSL_VERSIONS" openssl $SILENT_OUTPUT
   endif
 
