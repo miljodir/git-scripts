@@ -33,7 +33,7 @@ for ($i = 0; $i -lt $orgs.Length; $i++) {
 
     Write-host "Sending email to user: $($emails[$i]) regarding organization: $($orgs[$i])"
 
-    Send-MailMessage -From "GM Toolbox <gm_toolbox@equinor.com>" -To $emails[$i] -Subject "Info Regarding your Azure DevOps organizaion at $($orgs[$i])" `
+    Send-MailMessage -From "GM IT Toolbox <gm_toolbox@equinor.com>" -To $emails[$i] -Subject "Info Regarding your Azure DevOps organizaion at $($orgs[$i])" `
     -Body "
     You are receiving this email because you are the owner of an Azure DevOps organization using Equinor Azure AD authentication.
     
