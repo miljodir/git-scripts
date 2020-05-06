@@ -11,8 +11,8 @@ else
     Install-Module ImportExcel -Confirm
 }
 
-$userFrom = "gm_sds_rdi@equinor.com"
-$excelFile = "C:\azdevopsorg.xlsx"
+$userFrom = "gm_toolbox@equinor.com"
+$excelFile = "C:\azdevopstesting2.xlsx"
 $list = Import-Excel -Path $excelFile
 
 if ($?)
@@ -33,7 +33,7 @@ for ($i = 0; $i -lt $orgs.Length; $i++) {
 
     Write-host "Sending email to user: $($emails[$i]) regarding organization: $($orgs[$i])"
 
-    Send-MailMessage -From "SDP Team <gm_sds_rdi@equinor.com>" -To $emails[$i] -Subject "Info Regarding your Azure DevOps organizaion at $($orgs[$i])" `
+    Send-MailMessage -From "GM Toolbox <gm_toolbox@equinor.com>" -To $emails[$i] -Subject "Info Regarding your Azure DevOps organizaion at $($orgs[$i])" `
     -Body "
     You are receiving this email because you are the owner of an Azure DevOps organization using Equinor Azure AD authentication.
     
@@ -47,7 +47,7 @@ for ($i = 0; $i -lt $orgs.Length; $i++) {
     We do not have access to delete your organization, and we ask that you do this unless you are actively using your self created organization.
     Your organization is located here: $($orgs[$i])
 
-    If you have any questions, either reach out to @toolbox in the #sdpteam channel on equinor.slack.com, or send an email to gm_toolbox@equinor.com" `
+    If you have any questions, either reach out to @toolbox in the #sdpteam channel on equinor.slack.com, or reply to this email" `
     -SmtpServer "mrrr.statoil.com" -Port 25 -Credential $cred -UseSsl
 }
 
