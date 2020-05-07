@@ -42,7 +42,7 @@ for ($i = 0; $i -lt $orgs.Length; $i++) {
 
     The survey can be found here: https://forms.office.com/Pages/ResponsePage.aspx?id=NaKkOuK21UiRlX_PBbRZsB131KVwPclEvyzMgDkmOaVURFZEVzgxTUdSSlEwRFQyRjQwODJPQ1AyWS4u
 
-    We also wish that everyone in Equinor who uses Azure DevOps use the www.dev.azure.com/equinor organization. Apply for access in AccessIT.
+    We also wish that everyone in Equinor who uses Azure DevOps use the https://dev.azure.com/equinor organization. Apply for access in AccessIT.
 
     We do not have access to delete your organization, and we ask that you do this unless you are actively using your self created organization.
     Your organization is located here: $($orgs[$i])
