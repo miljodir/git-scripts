@@ -7,11 +7,14 @@ parser.add_argument('--summary-file', dest='puppet_status',
                     default="/opt/puppetlabs/puppet/cache/state/last_run_summary.yaml",
                     help=f"path to the puppet last_run_summary.yaml file. Defaults to '/opt/puppetlabs/puppet/cache/state/last_run_summary.yaml'")
 
-parser.add_argument('--warn-age', dest='warn_age', type=int, default=3600,
+parser.add_argument('--warn-age', type=int, default=3600,
                     help="Exits with '2'(warning) if last run older then this value(seconds). Defaults to 3600")
 
-parser.add_argument('--crit-age', dest='crit_age', type=int, default=7200,
+parser.add_argument('--crit-age', type=int, default=7200,
                     help="Exits with '1'(critical) if last run older then this value(seconds). Defaults to 7200")
+
+parser.add_argument('--ignore-failures', action="store_true",
+                    help="Failures in the puppet run does not affect the exit status. Default 'False'")
 
 args = parser.parse_args()
 status = {}
@@ -49,12 +52,16 @@ else:
     print(f"Missing information about the last run timestamp")
     exit(1)
 
-if last_run_age > args.warn_age:
-    print(message)
-    exit(2)
-elif last_run_age > args.crit_age:
+if last_run_age > args.crit_age:
     print(message)
     exit(1)
+elif last_run_age > args.warn_age:
+    print(message)
+    exit(2)
+elif not args.ignore_failures and bool(int(status.get("failure", "0"))):
+    print(message)
+    print(f"The last puppet run completed with {status.get('failure')} failures")
+    exit(2)
 else:
     print(message)
     exit(0)
