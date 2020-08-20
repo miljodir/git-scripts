@@ -30,13 +30,15 @@ $employeeIds = @()
 
 for ($i = 0; $i -lt $emails.Length; $i++) { 
 
-    $employeeIds += Get-Aduser -Filter "UserPrincipalName -eq $($emails[$i]) -Properties extensionAttribute12" | Select-Object extensionAttribute12 #aka EmployeeID |
+    $filter = "UserPrincipalName -eq  ""$emails[$i]"""
+    $employeeIds += Get-Aduser -Filter "UserPrincipalName -eq '$($emails[$i])'"  -Properties extensionAttribute12 | Select-Object extensionAttribute12 #aka EmployeeID |
 
 }
 
 if ($?) 
 {
-    $employeeIds | Export-Excel $excelFile -Append
+    Write-Host $employeeIds
+    $employeeIds | Export-Excel -show
 }
 
 
