@@ -36,10 +36,10 @@ else
 $employeeIds = @()
 
 
-for ($i = 0; $i -lt $emails.Length; $i++) { 
+for ($i = 0; $i -lt $nonAccessIT.Length; $i++) { 
 
-    $filter = "UserPrincipalName -eq  ""$emails[$i]"""
-    $employeeIds += Get-Aduser -Filter "UserPrincipalName -eq '$($emails[$i])'"  -Properties extensionAttribute12 | Select-Object extensionAttribute12 #aka EmployeeID |
+    $filter = "UserPrincipalName -eq  ""$nonAccessIT[$i]"""
+    $employeeIds += Get-Aduser -Filter "UserPrincipalName -eq '$($nonAccessIT[$i])'"  -Properties extensionAttribute12 | Select-Object extensionAttribute12 #aka EmployeeID |
 
 }
 
