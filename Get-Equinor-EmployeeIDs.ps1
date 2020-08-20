@@ -8,22 +8,30 @@ if (Get-InstalledModule -Name ImportExcel)
 else 
 {
     Write-host "Installing required ImportExcel module before continuing.."
-    Install-Module ImportExcel -Confirm
+    Install-Module ImportExcel -Confirm -
 }
 
 $excelFile = "C:\userlist.xlsx"
-$list = Import-Excel -Path $excelFile
+$list = Import-Excel -Path $excelFile -WorksheetName "DevOps not in accessit"
+$list2 = Import-Excel -Path $excelFile -WorksheetName "Accessit"
+
 
 if ($?)
 
     {
-        $emails = $list.Email
+        $allEmails = $list.Email
+        $joinedEmails = $list2.epost
+
+        $duplicatedEmails = $allEmails + $joinedEmails
+        $nonAccessIT = $duplicatedEmails | group | where-object -Property Count -EQ 1
     }
 else
     {
         Write-host "Error on import of users"
         exit
     }
+
+
 
 $employeeIds = @()
 
