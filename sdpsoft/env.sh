@@ -147,7 +147,7 @@ function find_and_source() {
     fi
 
     for version in ${available_versions[@]}; do
-
+        
         if [ "$version" == "$requested_version" ]; then
             # Find the separator between the software name and the version
             separator=$(find_version_separator "$SDPSOFT_PATH/$software_name" $requested_version)
@@ -228,7 +228,7 @@ function find_and_source() {
                 printf "$software_name: $requested_version\n"
                 printf "${COLOR_NONE}"
             fi
-
+           
             # Logging of software usage
             timestamp=$(date -u +"%F_%H:%M:%S")
             # Using sed -i causes a problem with writing temporary sed-file to /prog/sdpsoft
@@ -299,7 +299,7 @@ else
             printf "${COLOR_GREEN}${MPI}${COLOR_NONE}\n"
         fi
     fi
-
+    
       ################# LEGACY STUFF END ##############################
 
     # The following if's is just a simple check to look for what software the user requested
@@ -307,42 +307,42 @@ else
     # but there are some edge cases that needs to be treated differently, e.g. madagascar
     # Knowing if some software needs special treatment is something you could find in the software docs
     # or if the software have some special sourcing mechanisms
-
+    
     if [ -n "$ARPACK_NG_VERSION" ]; then
         ARPACK_NG_VERSIONS=(
             "3.4.0"
         )
         find_and_source $ARPACK_NG_VERSION ARPACK_NG_VERSIONS[@] arpack-ng
     fi
-
+    
     if [ -n "$ASTYLE_VERSION" ]; then
         ASTYLE_VERSIONS=(
             "2.05.1"
         )
         find_and_source $ASTYLE_VERSION ASTYLE_VERSIONS[@] astyle
     fi
-
+    
     if [ -n "$AUTOCONF_VERSION" ]; then
         AUTOCONF_VERSIONS=(
             "2.69"
         )
         find_and_source $AUTOCONF_VERSION AUTOCONF_VERSIONS[@] autoconf
     fi
-
+    
     if [ -n "$AUTOMAKE_VERSION" ]; then
         AUTOMAKE_VERSIONS=(
             "1.15"
         )
         find_and_source $AUTOMAKE_VERSION AUTOMAKE_VERSIONS[@] automake
     fi
-
+    
     if [ -n "$BINUTILS_VERSION" ]; then
         BINUTILS_VERSIONS=(
             "2.28"
         )
         find_and_source $BINUTILS_VERSION BINUTILS_VERSIONS[@] binutils
     fi
-
+    
     if [ -n "$BOOST_VERSION" ]; then
         BOOST_VERSIONS=(
             "1.44.0"
@@ -352,25 +352,26 @@ else
         )
         find_and_source $BOOST_VERSION BOOST_VERSIONS[@] boost
     fi
-
+    
     if [ -n "$CHECK_VERSION" ]; then
         CHECK_VERSIONS=(
              "0.9.5"
         )
         find_and_source $CHECK_VERSION CHECK_VERSIONS[@] check
     fi
-
+    
     if [ -n "$CLOOG_VERSION" ]; then
         CLOOG_VERSIONS=(
              "0.16.2"
         )
         find_and_source $CLOOG_VERSION CLOOG_VERSIONS[@] cloog
     fi
-
+    
     if [ -n "$CMAKE_VERSION" ]; then
         CMAKE_VERSIONS=(
              "3.10.2"
              "3.16.0"
+	     "3.12.4"
         )
         find_and_source $CMAKE_VERSION CMAKE_VERSIONS[@] cmake
     fi
@@ -381,14 +382,14 @@ else
         )
         find_and_source $COIND3D_VERSION COIND3D_VERSIONS[@] coin3d
     fi
-
+    
     if [ -n "$CPPUNIT_VERSION" ]; then
         CPPUNIT_VERSIONS=(
              "1.12.0"
         )
         find_and_source $CPPUNIT_VERSION CPPUNIT_VERSIONS[@] cppunit
     fi
-
+    
     if [ -n "$CURL_VERSION" ]; then
         CURL_VERSIONS=(
              "7.21.1"
@@ -396,35 +397,35 @@ else
         )
         find_and_source $CURL_VERSION CURL_VERSIONS[@] curl
     fi
-
+    
     if [ -n "$DELPHI_VERSION" ]; then
         DELPHI_VERSIONS=(
              "41_su40"
         )
         find_and_source $DELPHI_VERSION DELPHI_VERSIONS[@] delphi
     fi
-
+    
     if [ -n "$DERE_VERSION" ]; then
         DERE_VERSIONS=(
              "1.0"
         )
         find_and_source $DERE_VERSION DERE_VERSIONS[@] dere
     fi
-
+    
     if [ -n "$DUNE_VERSION" ]; then
         DUNE_VERSIONS=(
              "2.5.1"
         )
         find_and_source $DUNE_VERSION DUNE_VERSIONS[@] dune
     fi
-
+    
     if [ -n "$EXPAT_VERSION" ]; then
         EXPAT_VERSIONS=(
              "2.1.0"
         )
         find_and_source $EXPAT_VERSION EXPAT_VERSIONS[@] expat
     fi
-
+    
     if [ -n "$FFTW_VERSION" ]; then
         FFTW_VERSIONS=(
              "2.1.5"
@@ -434,14 +435,14 @@ else
         )
         find_and_source $FFTW_VERSION FFTW_VERSIONS[@] fftw
     fi
-
+    
     if [ -n "$FREETYPE_VERSION" ]; then
         FREETYPE_VERSIONS=(
              "2.4.12"
         )
         find_and_source $FREETYPE_VERSION FREETYPE_VERSIONS[@] freetype
     fi
-
+    
     if [ -n "$GCC_VERSION" ]; then
         GCC_VERSIONS=(
             "4.2.4"
@@ -453,14 +454,14 @@ else
         )
         find_and_source $GCC_VERSION GCC_VERSIONS[@] gcc
     fi
-
+    
     if [ -n "$GDB_VERSION" ]; then
         GDB_VERSIONS=(
               "8.0"
         )
         find_and_source $GDB_VERSION GDB_VERSIONS[@] gdb
     fi
-
+    
     if [ -n "$GIT_VERSION" ]; then
         GIT_VERSIONS=(
             "1.8.2"
@@ -473,14 +474,14 @@ else
         )
         find_and_source $GIT_VERSION GIT_VERSIONS[@] git
     fi
-
+    
     if [ -n "$GIT_EXTRAS_VERSION" ]; then
         GIT_EXTRAS_VERSIONS=(
             "3.0.0"
         )
         find_and_source $GIT_EXTRAS_VERSION GIT_EXTRAS_VERSIONS[@] git-extras
     fi
-
+    
     if [ -n "$GIT_LFS_VERSION" ]; then
         GIT_LFS_VERSIONS=(
             "2.3.0"
@@ -502,7 +503,7 @@ else
         )
         find_and_source $GLIBC_VERSION GLIBC_VERSIONS[@] glibc
     fi
-
+    
     if [ -n "$GMP_VERSION" ]; then
         GMP_VERSIONS=(
             "5.0.2"
@@ -512,14 +513,14 @@ else
         )
         find_and_source $GMP_VERSION GMP_VERSIONS[@] gmp
     fi
-
+    
     if [ -n "$GNUPLOT_VERSION" ]; then
         GNUPLOT_VERSIONS=(
             "4.6.5"
         )
         find_and_source $GNUPLOT_VERSION GNUPLOT_VERSIONS[@] gnuplot
     fi
-
+    
     if [ -n "$GO_VERSION" ]; then
         GO_VERSIONS=(
             "1.2.1"
@@ -533,14 +534,14 @@ else
             export GOROOT="$SDPSOFT_PATH/go${separator}${GO_VERSION}"
         fi
     fi
-
+    
     if [ -n "$GRACE_VERSION" ]; then
         GRACE_VERSIONS=(
             "5.99.0"
         )
         find_and_source $GRACE_VERSION GRACE_VERSIONS[@] grace
     fi
-
+    
     if [ -n "$GRT_VERSION" ]; then
         GRT_VERSIONS=(
             "1.4.0"
@@ -550,35 +551,35 @@ else
         )
         find_and_source $GRT_VERSION GRT_VERSIONS[@] GRT
     fi
-
+    
     if [ -n "$GSL_VERSION" ]; then
         GSL_VERSIONS=(
             "1.9"
         )
         find_and_source $GSL_VERSION GSL_VERSIONS[@] gsl
     fi
-
+    
     if [ -n "$HDF5_VERSION" ]; then
         HDF5_VERSIONS=(
             "1.8.8"
         )
         find_and_source $HDF5_VERSION HDF5_VERSIONS[@] hdf5
     fi
-
+    
     if [ -n "$ICU_VERSION" ]; then
         ICU_VERSIONS=(
             "4.2.1"
         )
         find_and_source $ICU_VERSION ICU_VERSIONS[@] icu
     fi
-
+    
     if [ -n "$IMAGEMAGICK_VERSION" ]; then
         IMAGEMAGICK_VERSIONS=(
             "6.6.1-5"
         )
         find_and_source $IMAGEMAGICK_VERSION IMAGEMAGICK_VERSIONS[@] ImageMagick
     fi
-
+    
     if [ -n "$JDK_VERSION" ]; then
         JDK_VERSIONS=(
             "1.6.0_16"
@@ -595,14 +596,14 @@ else
         )
         find_and_source $JDK_VERSION JDK_VERSIONS[@] jdk
     fi
-
+    
     if [ -n "$JQ_VERSION" ]; then
         JQ_VERSIONS=(
             "1.5"
         )
         find_and_source $JQ_VERSION JQ_VERSIONS[@] jq
     fi
-
+    
     if [ -n "$JSEISIO_VERSION" ]; then
         JSEISIO_VERSIONS=(
             "v1.0"
@@ -610,28 +611,28 @@ else
         )
         find_and_source $JSEISIO_VERSION JSEISIO_VERSIONS[@] jseisio
     fi
-
+    
     if [ -n "$JULIA_VERSION" ]; then
         JULIA_VERSIONS=(
             "0.4.6"
         )
         find_and_source $JULIA_VERSION JULIA_VERSIONS[@] julia
     fi
-
+    
     if [ -n "$KDIFF3_VERSION" ]; then
         KDIFF3_VERSIONS=(
             "0.9.96"
         )
         find_and_source $KDIFF3_VERSION KDIFF3_VERSIONS[@] kdiff3
     fi
-
+    
     if [ -n "$KERNELTOMO_VERSION" ]; then
         KERNELTOMO_VERSIONS=(
             "1.0"
         )
         find_and_source $KERNELTOMO_VERSION KERNELTOMO_VERSIONS[@] KernelTomo
     fi
-
+    
     if [ -n "$LAPACK_VERSION" ]; then
         LAPACK_VERSIONS=(
             "3.7.0"
@@ -653,7 +654,7 @@ else
         )
         find_and_source $LIBEVENT_VERSION LIBEVENT_VERSIONS[@] libevent
     fi
-
+    
     if [ -n "$LIBFFI_VERSION" ]; then
         LIBFFI_VERSIONS=(
             "3.0.9"
@@ -661,14 +662,14 @@ else
         )
         find_and_source $LIBFFI_VERSION LIBFFI_VERSIONS[@] libffi
     fi
-
+    
     if [ -n "$LIBNOTIFY_VERSION" ]; then
         LIBNOTIFY_VERSIONS=(
             "0.4.4"
         )
         find_and_source $LIBNOTIFY_VERSION LIBNOTIFY_VERSIONS[@] libnotify
     fi
-
+    
     if [ -n "$LIBSTATOIL_VERSION" ]; then
         LIBSTATOIL_VERSIONS=(
             "0.1"
@@ -676,21 +677,21 @@ else
         )
         find_and_source $LIBSTATOIL_VERSION LIBSTATOIL_VERSIONS[@] libstatoil
     fi
-
+    
     if [ -n "$LIBTASN1_VERSION" ]; then
         LIBTASN1_VERSIONS=(
             "4.12"
         )
         find_and_source $LIBTASN1_VERSION LIBTASN1_VERSIONS[@] libtasn1
     fi
-
+    
     if [ -n "$LIBUNISTRING_VERSION" ]; then
         LIBUNISTRING_VERSIONS=(
             "0.9.7"
         )
         find_and_source $LIBUNISTRING_VERSION LIBUNISTRING_VERSIONS[@] libunistring
     fi
-
+    
     if [ -n "$MADAGASCAR_VERSION" ]; then
         # Let Madagascar be source with their own scripts that they provide
         MADAGASCAR_FOUND=0
@@ -716,21 +717,21 @@ else
             printf "${COLOR_NONE}"
         fi
     fi
-
+    
     if [ -n "$MERCURIAL_VERSION" ]; then
         MERCURIAL_VERSIONS=(
             "1.6"
         )
         find_and_source $MERCURIAL_VERSION MERCURIAL_VERSIONS[@] mercurial
     fi
-
+    
     if [ -n "$MPC_VERSION" ]; then
         MPC_VERSIONS=(
             "0.9"
         )
         find_and_source $MPC_VERSION MPC_VERSIONS[@] mpc
     fi
-
+    
     if [ -n "$MPFR_VERSION" ]; then
         MPFR_VERSIONS=(
             "2.4.2"
@@ -738,7 +739,7 @@ else
         )
         find_and_source $MPFR_VERSION MPFR_VERSIONS[@] mpfr
     fi
-
+    
     if [ -n "$MPICH_VERSION" ]; then
         MPICH_VERSIONS=(
             "1.2.6_i686"
@@ -746,28 +747,28 @@ else
         )
         find_and_source $MPICH_VERSION MPICH_VERSIONS[@] mpich
     fi
-
+    
     if [ -n "$MPICH2_VERSION" ]; then
         MPICH2_VERSIONS=(
             "1.3.2"
         )
         find_and_source $MPICH2_VERSION MPICH2_VERSIONS[@] mpich2
     fi
-
+    
     if [ -n "$NETCDF_VERSION" ]; then
         NETCDF_VERSIONS=(
             "3"
         )
         find_and_source $NETCDF_VERSION NETCDF_VERSIONS[@] netcdf
     fi
-
+    
     if [ -n "$NETTLE_VERSION" ]; then
         NETTLE_VERSIONS=(
             "3.3"
         )
         find_and_source $NETTLE_VERSION NETTLE_VERSIONS[@] nettle
     fi
-
+    
     if [ -n "$NODE_VERSION" ]; then
         NODE_VERSIONS=(
             "0.10.12"
@@ -776,14 +777,14 @@ else
         )
         find_and_source $NODE_VERSION NODE_VERSIONS[@] node
     fi
-
+    
     if [ -n "$OCTAVE_VERSION" ]; then
         OCTAVE_VERSIONS=(
             "4.2.1"
         )
         find_and_source $OCTAVE_VERSION OCTAVE_VERSIONS[@] octave
     fi
-
+    
     if [ -n "$OPENBLAS_VERSION" ]; then
         OPENBLAS_VERSIONS=(
             "0.2.14"
@@ -791,7 +792,7 @@ else
         )
         find_and_source $OPENBLAS_VERSION OPENBLAS_VERSIONS[@] openblas
     fi
-
+    
     if [ -n "$OPENMPI_VERSION" ]; then
         OPENMPI_VERSIONS=(
             "1.2.5"
@@ -815,61 +816,61 @@ else
         OPENSSL_VERSIONS=(
             "1.0.2l"
             "1.1.0f"
-            "1.1.1d"
-            "1.1.1"
+	    "1.1.1d"
+	    "1.1.1"
         )
         find_and_source $OPENSSL_VERSION OPENSSL_VERSIONS[@] openssl
     fi
-
+    
     if [ -n "$OPTARADON_VERSION" ]; then
         OPTARADON_VERSIONS=(
             "r1"
         )
         find_and_source $OPTARADON_VERSION OPTARADON_VERSIONS[@] OptaRadon
     fi
-
+    
     if [ -n "$OSG_VERSION" ]; then
         OSG_VERSIONS=(
             "2.8.2"
         )
         find_and_source $OSG_VERSION OSG_VERSIONS[@] osg
     fi
-
+    
     if [ -n "$P11_KIT_VERSION" ]; then
         P11_KIT_VERSIONS=(
             "0.23.2"
         )
         find_and_source $P11_KIT_VERSION P11_KIT_VERSIONS[@] p11-kit
     fi
-
+    
     if [ -n "$PCRE_VERSION" ]; then
         PCRE_VERSIONS=(
             "8.40"
         )
         find_and_source $PCRE_VERSION PCRE_VERSIONS[@] pcre
     fi
-
+    
     if [ -n "$PHANTOMJS_VERSION" ]; then
         PHANTOMJS_VERSIONS=(
             "1.6.2-linux-x86_64-dynamic"
         )
         find_and_source $PHANTOMJS_VERSION PHANTOMJS_VERSIONS[@] phantomjs
     fi
-
+    
     if [ -n "$PHP_VERSION" ]; then
         PHP_VERSIONS=(
             "5.3.8"
         )
         find_and_source $PHP_VERSION PHP_VERSIONS[@] php
     fi
-
+    
     if [ -n "$PPL_VERSION" ]; then
         PPL_VERSIONS=(
             "0.11.2"
         )
         find_and_source $PPL_VERSION PPL_VERSIONS[@] ppl
     fi
-
+    
     if [ -n "$PUMA_VERSION" ]; then
         PUMA_VERSIONS=(
             "v1.0"
@@ -878,7 +879,7 @@ else
         )
         find_and_source $PUMA_VERSION PUMA_VERSIONS[@] puma
     fi
-
+    
     if [ -n "$PYTHON_VERSION" ]; then
         PYTHON_VERSIONS=(
             "2.4"
@@ -896,6 +897,7 @@ else
             "3.6.2"
             "3.6.4"
             "3.7.1"
+            "3.7.3"
         )
         find_and_source $PYTHON_VERSION PYTHON_VERSIONS[@] python
     fi
@@ -906,14 +908,14 @@ else
         )
         find_and_source $QHULL_VERSION QHULL_VERSIONS[@] qhull
     fi
-
+    
     if [ -n "$QRUPDATE_VERSION" ]; then
         QRUPDATE_VERSIONS=(
             "1.1.2"
         )
         find_and_source $QRUPDATE_VERSION QRUPDATE_VERSIONS[@] qrupdate
     fi
-
+    
     if [ -n "$QT_VERSION" ]; then
         QT_VERSIONS=(
              "3.3.5"
@@ -933,7 +935,7 @@ else
               export QT_PATH="$SDPSOFT_PATH/qt-x11${separator}${QT_VERSION}"
           fi
     fi
-
+    
     if [ -n "$RUBY_VERSION" ]; then
         RUBY_VERSIONS=(
             "1.8.7"
@@ -946,7 +948,7 @@ else
               export GEM_HOME="$SDPSOFT_PATH/ruby${separator}${RUBY_VERSION}/lib/ruby/gems/$RUBY_VERSION"
           fi
     fi
-
+    
     if [ -n "$SCALA_VERSION" ]; then
         SCALA_VERSIONS=(
             "2.8.0"
@@ -955,14 +957,14 @@ else
         )
         find_and_source $SCALA_VERSION SCALA_VERSIONS[@] scala
     fi
-
+    
     if [ -n "$SCONS_VERSION" ]; then
         SCONS_VERSIONS=(
             "2.1.0"
         )
         find_and_source $SCONS_VERSION SCONS_VERSIONS[@] scons
     fi
-
+    
     if [ -n "$SCREENSEIS_VERSION" ]; then
         SCREENSEIS_VERSIONS=(
             "v.2.6"
@@ -972,7 +974,7 @@ else
         )
         find_and_source $SCREENSEIS_VERSION SCREENSEIS_VERSIONS[@] screenseis
     fi
-
+    
     if [ -n "$SCREENSHOT_VERSION" ]; then
         SCREENSHOT_VERSIONS=(
             "v2.0"
@@ -980,28 +982,28 @@ else
         )
         find_and_source $SCREENSHOT_VERSION SCREENSHOT_VERSIONS[@] ScreenShot
     fi
-
+    
     if [ -n "$SEPLIB_VERSION" ]; then
         SEPLIB_VERSIONS=(
             "6.5.3"
         )
         find_and_source $SEPLIB_VERSION SEPLIB_VERSIONS[@] seplib
     fi
-
+    
     if [ -n "$SIMVOLEON_VERSION" ]; then
         SIMVOLEON_VERSIONS=(
             "2.0.1"
         )
         find_and_source $SIMVOLEON_VERSION SIMVOLEON_VERSIONS[@] simvoleon
     fi
-
+    
     if [ -n "$SOQT_VERSION" ]; then
         SOQT_VERSIONS=(
             "1.5.0"
         )
         find_and_source $SOQT_VERSION SOQT_VERSIONS[@] soqt
     fi
-
+    
     if [ -n "$SUITESPARSE_VERSION" ]; then
         SUITESPARSE_VERSIONS=(
             "4.5.4"
@@ -1019,7 +1021,7 @@ else
         find_and_source $SU_VERSION SU_VERSIONS[@] SU
         export CWPROOT=$SDPSOFT_PATH/SU_$SU_VERSION/
     fi
-
+    
     if [ -n "$SVFTOOLS_VERSION" ]; then
         SVFTOOLS_VERSIONS=(
             "r4"
@@ -1029,7 +1031,7 @@ else
         )
         find_and_source $SVFTOOLS_VERSION SVFTOOLS_VERSIONS[@] svftools
     fi
-
+    
     if [ -n "$TCL_VERSION" ]; then
         TCL_VERSIONS=(
             "8.4.20"
@@ -1037,7 +1039,7 @@ else
         )
         find_and_source $TCL_VERSION TCL_VERSIONS[@] tcl
     fi
-
+    
     if [ -n "$TIGER_VERSION" ]; then
         TIGER_VERSIONS=(
             "v0.7.1"
@@ -1046,7 +1048,7 @@ else
         )
         find_and_source $TIGER_VERSION TIGER_VERSIONS[@] tiger
     fi
-
+    
     if [ -n "$TK_VERSION" ]; then
         TK_VERSIONS=(
             "8.4.20"
@@ -1054,7 +1056,7 @@ else
         )
         find_and_source $TK_VERSION TK_VERSIONS[@] tk
     fi
-
+    
     if [ -n "$TMUX_VERSION" ]; then
         TMUX_VERSIONS=(
             "2.6"
@@ -1068,25 +1070,34 @@ else
         )
         find_and_source $TORQUE_VERSION TORQUE_VERSIONS[@] torque
     fi
-
+    
     if [ -n "$WX_VERSION" ]; then
         WX_VERSIONS=(
             "2.9.1.1"
         )
         find_and_source $WX_VERSION WX_VERSIONS[@] wx
     fi
-
+    
     if [ -n "$GRPC_VERSION" ]; then
         GRPC_VERSIONS=(
             "1.20.1"
         )
         find_and_source $GRPC_VERSION GRPC_VERSIONS[@] grpc
     fi
-
+    
     if [ -n "$ZEROMQ_VERSION" ]; then
         ZEROMQ_VERSIONS=(
             "4.2.1"
         )
         find_and_source $ZEROMQ_VERSION ZEROMQ_VERSIONS[@] zeromq
     fi
+
+    if [ -n "$LIBRARIES_VERSION" ]; then
+        LIBRARIES_VERSIONS=(
+             "1"
+        )
+        find_and_source $LIBRARIES_VERSION LIBRARIES_VERSIONS[@] libraries
+    fi
+
+
 fi

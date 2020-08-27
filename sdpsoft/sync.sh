@@ -25,14 +25,16 @@ SERVERS=(
     be-linrgsn097.be.statoil.no
     tr-linrgsn019.tr.statoil.no
     st-linrgs236.st.statoil.no
+# Baloo Cluster
+    st-lcrgs01-01-03.st.statoil.no
     ha-linrgsn050.ha.statoil.no
-    st-lcmtop01.st.statoil.no
+#    st-lcmtop01.st.statoil.no
     hou-linrgsn034.hou.statoil.no
-    rio-linrgsn003.rio.statoil.no
-    cal-linrgsn009.cal.statoil.no
+ #   rio-linrgsn003.rio.statoil.no
+#    cal-linrgsn009.cal.statoil.no
     stjohn-linrgs006.stjohn.statoil.no
-    hou-lcctop01.hou.statoil.no
-    gfs01.hou.statoil.no
+  #  hou-lcctop01.hou.statoil.no
+   # ffs01.hou.statoil.no
 )
 
 # Print usage info if none or an invalid argument is given.
