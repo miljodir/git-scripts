@@ -19,11 +19,11 @@ $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
 $headers.Add("content-type","application/json")
 $headers.Add("Authorization","bearer $token")
 
-$body = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100) { edges { node {name, login} } } } }"}'
-$body2 = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100) { edges { node { guid, samlIdentity {nameId}, user {name, login} } } } } } }"}'
+$bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100) { edges { node {name, login} } pageInfo {endCursor, hasNextPage} } } }"}'
+$bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100) { edges { node { samlIdentity {nameId}, user {name, login} } } pageInfo {endCursor, hasNextPage}  } } } }"}'
 
 
-$response = Invoke-WebRequest -Uri $url -Method Post -Body $body2 -Headers $headers
+$response = Invoke-WebRequest -Uri $url -Method Post -Body $bodyB -Headers $headers
 Write-host $response.Content
 
 echo  $response.Content
