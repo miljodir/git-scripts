@@ -13,25 +13,19 @@ else {
 }
 
 
-$after = "after:"
-
 $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
 $headers.Add("content-type","application/json")
 $headers.Add("Authorization","bearer $token")
 
 $bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 ) { edges { node {name, login} } pageInfo {endCursor, hasNextPage} } } }"}'
-$bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100) { edges { node { samlIdentity {nameId}, user {name, login} } } pageInfo {endCursor, hasNextPage}  } } } }"}'
 
 $offset = ""
 
 Do
 
 {
-    #$bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 \"\$offset\") { edges { node {name, login} } pageInfo {endCursor, hasNextPage} } } }"}'
-    echo "offset post iteration: $offset"
     $response = Invoke-WebRequest -Uri $url -Method Post -Body $bodyA -Headers $headers
 
-    $response.content
     $resp = $response.Content | convertfrom-json
     $offset = $resp.data.organization.membersWithRole.pageInfo.endCursor
     $hasNextPage = $resp.data.organization.membersWithRole.pageInfo.hasNextPage
@@ -44,8 +38,7 @@ Do
     echo "Has next page: $hasNextPage"
     echo "offset: $offset"
 
-    echo "Page completed. Next iteration: "
+    echo "Member Page completed. Next iteration: "
 
 } While ($hasNextPage) 
-
 
