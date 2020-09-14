@@ -21,6 +21,8 @@ $bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(fi
 
 $offset = ""
 
+[array]$fulltable = New-Object PsObject -Property @{ login='' ; name='' }
+
 Do
 
 {
@@ -29,16 +31,18 @@ Do
     $resp = $response.Content | convertfrom-json
     $offset = $resp.data.organization.membersWithRole.pageInfo.endCursor
     $hasNextPage = $resp.data.organization.membersWithRole.pageInfo.hasNextPage
-    $hashtable = $resp.data.organization.membersWithRole.edges
+    $hashtable = $resp.data.organization.membersWithRole.edges.node
 
     $bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 after: \"$offset\") { edges { node {name, login} } pageInfo {endCursor, hasNextPage} } } }"}'
     $bodyA = $ExecutionContext.InvokeCommand.ExpandString($bodyA)
 
-    echo $hashtable
     echo "Has next page: $hasNextPage"
     echo "offset: $offset"
+
+    $fulltable += $hashtable
 
     echo "Member Page completed. Next iteration: "
 
 } While ($hasNextPage) 
 
+echo $fulltable
