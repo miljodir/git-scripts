@@ -21,6 +21,8 @@ $offset2 = ""
 
 $bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100) { edges { node { samlIdentity {nameId}, user {name, login} } } pageInfo {endCursor, hasNextPage}  } } } }"}'
 
+[array]$fulltable = New-Object PsObject -Property @{ login='' ; name='' }
+[array]$fullLogin = New-Object PsObject -Property @{ nameId = '' }
 
 Do
 
@@ -35,12 +37,15 @@ Do
     $bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100 after: \"$offset2\") { edges { node { samlIdentity {nameId}, user {name, login} } } pageInfo {endCursor, hasNextPage}  } } } }"}'
     $bodyB = $ExecutionContext.InvokeCommand.ExpandString($bodyB)
 
-
     echo "Has next page: $hasNextPage2"
 
     echo "offset: $offset2"
-    echo $hashtable2
+    $fullTable += $hashtable2.user
+    $fullLogin += $hashtable2.samlIdentity
 
     echo "SAML Page completed. Next iteration: "
 
 } While ($hasNextPage2) 
+
+$fulltable | Export-Excel
+$fullLogin | Export-Excel

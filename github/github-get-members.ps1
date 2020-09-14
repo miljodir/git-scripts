@@ -46,3 +46,4 @@ Do
 } While ($hasNextPage) 
 
 echo $fulltable
+$fulltable | Export-Excel
