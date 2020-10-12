@@ -12,14 +12,14 @@ else
 }
 
 $userFrom = "gm_toolbox@equinor.com"
-$excelFile = "C:\appl\ghmails2.xlsx"
-$list = Import-Excel -Path $excelFile -WorksheetName "Sheet1"
+$excelFile = "C:\appl\attempt2.xlsx"
+$list = Import-Excel -Path $excelFile -WorksheetName "Sheet2"
 
 if ($?)
 
     {
         $users = $list.login
-        $emails = $list.mail
+        $emails = $list.email
     }
 else
     {
