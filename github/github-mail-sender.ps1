@@ -44,6 +44,7 @@ for ($i = 0; $i -lt $emails.Length; $i++) {
     We ask you to fix this by:
     1) Clicking this URL to complete linking to your account: https://github.com/orgs/equinor/sso
     2) Ensure that your existing Personal Access tokens (if any) will continue to work, by clicking 'Enable SSO' per token: https://github.com/settings/tokens
+    3) Ensure that your existing SSH keys (if any) will continue to work, by clicking 'Enable SSO' per key: https://github.com/settings/keys
 
     If you are getting an error during the linking process or during sign-in after linking your account:
     Ensure you are part of the AccessIT group 'Github' https://accessit.equinor.com/Search/Search?term=github
