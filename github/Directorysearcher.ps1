@@ -11,8 +11,7 @@ else
     Install-Module ImportExcel -Confirm
 }
 
-$userFrom = "gm_toolbox@equinor.com"
-$excelFile = "C:\Github unlinked details.xlsx"
+$excelFile = "C:\Users\AULS\OneDrive - Equinor\attempt2.xlsx"
 $list = Import-Excel -Path $excelFile
 [array]$suggestedEmailList
 
