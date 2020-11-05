@@ -17,22 +17,49 @@ for ($i=1; $i -lt 5; $i++)
     $allOutsideCollabs += $collabs.Content | ConvertFrom-Json | select login, html_url
 }#>
 
-for ($i=1; $i -lt 3; $i++)
+
+$url = "https://api.github.com/graphql"
+$offset = ""
+[array]$fulltable = New-Object PsObject -Property @{name=''; collaborators='' }
+
+$body = @'
+{"query":"query { organization(login: \"Equinor\") { repositories(first: 100) { edges { node { name collaborators(affiliation: OUTSIDE) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
+'@
+
+Do
+
 {
-    $api = "https://api.github.com/orgs/equinor/repos?q&page=$i&per_page=3"
-    $repos = Invoke-WebRequest -Uri $api -Headers @{Authorization="Token $token"}
-    $allEquinorRepos += $repos.Content | ConvertFrom-Json | select name, html_url
-}
+    $response = Invoke-WebRequest -Uri $url -Method Post -Body $body -Headers @{Authorization="Token $token"} -ContentType "application/json"
 
-for ($i=1; $i -lt $allEquinorRepos.Length; $i++)
+    $resp = $response.Content | convertfrom-json
+    $offset = $resp.data.organization.repositories.pageInfo.endCursor
+    $hasNextPage = $resp.data.organization.repositories.pageInfo.hasNextPage
+    $hashtable = $resp.data.organization.repositories.edges.node
+
+$body = @'
+    {"query":"query { organization(login: \"Equinor\") { repositories(first: 100 after: \"$offset\") { edges { node { name collaborators(affiliation: OUTSIDE) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
+'@
+
+    $body = $ExecutionContext.InvokeCommand.ExpandString($body)
+
+    echo "Has next page: $hasNextPage"
+    echo "offset: $offset"
+
+    $fulltable += $hashtable
+
+    echo "Member Page completed. Next iteration: "
+
+} While ($hasNextPage) 
+
+$collection = @()
+
+foreach ($item in $fulltable)
 {
-    $api = "https://api.github.com/repos/equinor/$($allEquinorRepos[$i].name)/collaborators?q&affiliation=outside"
-
-    $response = Invoke-WebRequest -Uri $api -Headers @{Authorization="Token $token"}
-
-    if ($response.Content -notlike '`[]')
-    {
-        Write-Host "REPO: $($allEquinorRepos[$i].html_url) has outside collaborators:" -ForegroundColor Yellow
-        $response.Content | ConvertFrom-Json | select login, html_url, permissions | out-default
+    $collection += [pscustomobject] @{
+        Repo   = $item.name
+        ExternalCollaborators = ($item.collaborators.edges.node.login -join ', ')
+        Permissions   = ($item.collaborators.edges.permission -join ', ')
     }
 }
+
+$collection | export-excel
