@@ -17,3 +17,34 @@ for ($i=1; $i -lt 5; $i++)
 }
 
 $allOutsideCollabs
+
+$allDirectPermissionsForOrg = 
+
+$bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 after: \"$offset\") { edges { node {name, login, email} } pageInfo {endCursor, hasNextPage} } } }"}'
+
+'{
+    organization(login: "Equinor-test") {
+      repositories(first: 100) {
+        edges {
+          node {
+            collaborators {
+              edges {
+                node {
+                  login
+                }
+                permissionSources {
+                  source {
+                    ... on Repository {
+                      REPO: name
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  '
+  
