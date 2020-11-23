@@ -6,11 +6,16 @@ $char = for ($i = 0; $i -lt $alphabets.length; $i++) { $alphabets[$i] }
 $servicePrincipals = @(
     'sdp-common-grafana-sp'
     'sdp-jenkins-sp'
-    'sdp Team'
+    'SDP Team'
     'sdpaks-common-grafana-sp'
     'sdpaks-common-velero-sp'
     'sdpaks-dev-aks-sp'
     'sdpaks-dev-dns-sp'
+    'sdpaks-prod-aks-sp'
+    'sdpaks-prod-dns-sp'
+    'sdpaksAllEquinor'
+    'sdpaksCrSp'
+    'sdpaksDevSp'
 )
 
 foreach ($sp in $servicePrincipals)
