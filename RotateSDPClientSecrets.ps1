@@ -8,7 +8,6 @@ $servicePrincipals = @(
     'sdp-jenkins-sp'
     'sdp Team'
     'sdpaks-common-grafana-sp'
-    'sdpaks-common-grafana-sp'
     'sdpaks-common-velero-sp'
     'sdpaks-dev-aks-sp'
     'sdpaks-dev-dns-sp'
