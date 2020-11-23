@@ -17,11 +17,11 @@ $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
 $headers.Add("content-type","application/json")
 $headers.Add("Authorization","bearer $token")
 
-$bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 ) { edges { node {name, login} } pageInfo {endCursor, hasNextPage} } } }"}'
+$bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 ) { edges { node {name, login, email} } pageInfo {endCursor, hasNextPage} } } }"}'
 
 $offset = ""
 
-[array]$fulltable = New-Object PsObject -Property @{ login='' ; name='' }
+[array]$fulltable = New-Object PsObject -Property @{ login='' ; name='' ; email=''}
 
 Do
 
@@ -33,7 +33,7 @@ Do
     $hasNextPage = $resp.data.organization.membersWithRole.pageInfo.hasNextPage
     $hashtable = $resp.data.organization.membersWithRole.edges.node
 
-    $bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 after: \"$offset\") { edges { node {name, login} } pageInfo {endCursor, hasNextPage} } } }"}'
+    $bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 after: \"$offset\") { edges { node {name, login, email} } pageInfo {endCursor, hasNextPage} } } }"}'
     $bodyA = $ExecutionContext.InvokeCommand.ExpandString($bodyA)
 
     echo "Has next page: $hasNextPage"
@@ -45,5 +45,12 @@ Do
 
 } While ($hasNextPage) 
 
-echo $fulltable
-$fulltable | Export-Excel
+#echo $fulltable
+
+$fulltable | foreach{
+     if ($_.email.endswith("@equinor.com"))
+     { echo $_.email}
+}
+
+
+#$fulltable | Export-Excel
