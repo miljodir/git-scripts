@@ -23,8 +23,8 @@ $collection2= @()
 
 for ($i =0; $i -lt $allRepos.Length; $i++) # This step is only necessary due to pwsh having a hard time with deserialiing hashtables...
 {
-    $api = $apiBase + "repos/$($allRepos[$i].full_name)/collaborators"
-    $collabs = Invoke-RestMethod -Uri $api -Headers @{Authorization="Token $token"}
+    #$api = $apiBase + "repos/$($allRepos[$i].full_name)/collaborators"
+    #$collabs = Invoke-RestMethod -Uri $api -Headers @{Authorization="Token $token"}
     $collection2 += [pscustomobject] @{
         Repo    = $allRepos[$i].html_url
         Description = $allRepos[$i].description
@@ -33,10 +33,9 @@ for ($i =0; $i -lt $allRepos.Length; $i++) # This step is only necessary due to 
         HasPush      = $allRepos[$i].permissions.push
         HasMaintainer       = $allRepos[$i].permissions.maintain
         HasAdmin       = $allRepos[$i].permissions.admin
-        IsNotPublic = $allRepos[$i].private
     }
 }
 
 # /repos/{owner}/{repo}/collaborators still doesnt separate users inherited from "Equinor" team...
 
-#$collection2 | export-excel
+$collection2 | export-excel
