@@ -23,19 +23,21 @@ $collection2= @()
 
 for ($i =0; $i -lt $allRepos.Length; $i++) # This step is only necessary due to pwsh having a hard time with deserialiing hashtables...
 {
-    #$api = $apiBase + "repos/$($allRepos[$i].full_name)/collaborators"
-    #$collabs = Invoke-RestMethod -Uri $api -Headers @{Authorization="Token $token"}
-    $collection2 += [pscustomobject] @{
-        Repo    = $allRepos[$i].html_url
-        Description = $allRepos[$i].description
-        HasPull       = $allRepos[$i].permissions.pull
-        HasTriage = $allRepos[$i].permissions.triage
-        HasPush      = $allRepos[$i].permissions.push
-        HasMaintainer       = $allRepos[$i].permissions.maintain
-        HasAdmin       = $allRepos[$i].permissions.admin
+    $api2 = $apiBase + "repos/$($allrepos[$i].full_name)" #GET /repos/:owner/:repo
+    $repo = Invoke-RestMethod -Method Get -Uri $api2 -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"}
+
+    if ($repo.visibility -eq "private") {
+        $collection2 += [pscustomobject] @{
+            Repo    = $allRepos[$i].html_url
+            Description = $allRepos[$i].description
+            HasPull       = $allRepos[$i].permissions.pull
+            HasTriage = $allRepos[$i].permissions.triage
+            HasPush      = $allRepos[$i].permissions.push
+            HasMaintainer       = $allRepos[$i].permissions.maintain
+            HasAdmin       = $allRepos[$i].permissions.admin
+            Visibility     = $repo.visibility
+        }
     }
 }
-
-# /repos/{owner}/{repo}/collaborators still doesnt separate users inherited from "Equinor" team...
 
 $collection2 | export-excel
