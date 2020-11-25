@@ -4,18 +4,7 @@ $endDate = (Get-Date).AddDays(365)
 $char = for ($i = 0; $i -lt $alphabets.length; $i++) { $alphabets[$i] }
 
 $servicePrincipals = @(
-    'sdp-common-grafana-sp'
-    'sdp-jenkins-sp'
-    'SDP Team'
-    'sdpaks-common-grafana-sp'
-    'sdpaks-common-velero-sp'
-    'sdpaks-dev-aks-sp'
-    'sdpaks-dev-dns-sp'
-    'sdpaks-prod-aks-sp'
-    'sdpaks-prod-dns-sp'
-    'sdpaksAllEquinor'
-    'sdpaksCrSp'
-    'sdpaksDevSp'
+    'sdpaks-prod-psql'
 )
 
 foreach ($sp in $servicePrincipals)
@@ -32,7 +21,7 @@ foreach ($sp in $servicePrincipals)
     echo "Creating new clientSecret for app registration $($sp)"
 
     $pw = ConvertTo-SecureString -String $string -AsPlainText -Force
-    New-AzADAppCredential -DisplayName $sp -Password $pw -EndDate $endDate
+    #New-AzADAppCredential -DisplayName $sp -Password $pw -EndDate $endDate
 
     echo "Updating keyvault secret for $($sp)"
 
