@@ -12,6 +12,7 @@ else {
 $allRepos
 $apiBase = "https://api.github.com/"
 
+# Fetch All internal/private repos where the Equinor team has access (This API doesn't separate between internal and private yet)
 for ($i=1; $i -lt 4; $i++)
 {
     $api = $apiBase + "orgs/equinor/teams/Equinor/repos?q&page=$i&per_page=100"
@@ -21,11 +22,13 @@ for ($i=1; $i -lt 4; $i++)
 
 $collection2= @() 
 
-for ($i =0; $i -lt $allRepos.Length; $i++) # This step is only necessary due to pwsh having a hard time with deserialiing hashtables...
+for ($i =0; $i -lt $allRepos.Length; $i++)
 {
+    # Use the list of private/internal repos and query another API to determine if they are private or internal
     $api2 = $apiBase + "repos/$($allrepos[$i].full_name)" #GET /repos/:owner/:repo
     $repo = Invoke-RestMethod -Method Get -Uri $api2 -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"}
 
+    # Generate formatted Excel sheet (permissions hashtable requires custom deserialization)
     if ($repo.visibility -eq "private") {
         $collection2 += [pscustomobject] @{
             Repo    = $allRepos[$i].html_url
@@ -40,4 +43,14 @@ for ($i =0; $i -lt $allRepos.Length; $i++) # This step is only necessary due to 
     }
 }
 
-$collection2 | export-excel
+# Export affected repos to excel sheet
+#$collection2 | export-excel
+
+# Convert 'legacy internal' repos to 'private'
+$body = '{"visibility": "internal"}'
+
+foreach ($repo in $collection2)
+{
+    $api2 = $apiBase + "repos/$($allrepos[$i].full_name)"
+    $call = Invoke-RestMethod -Method Patch -Uri $api2 -Body $body -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"}
+}
