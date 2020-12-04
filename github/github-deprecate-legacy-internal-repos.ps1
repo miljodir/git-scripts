@@ -54,5 +54,5 @@ foreach ($item in $collection2)
 {
     $api3 = $apiBase + "repos/$($item.FullName)"
     echo $api3
-    Invoke-RestMethod -Method Patch -Uri $api3 -Body $body -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"}
+    Invoke-RestMethod -Method Patch -Uri $api3 -Body $body -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"} | select full_name, visibility
 }
