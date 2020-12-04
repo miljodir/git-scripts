@@ -32,6 +32,7 @@ for ($i =0; $i -lt $allRepos.Length; $i++)
     if ($repo.visibility -eq "private") {
         $collection2 += [pscustomobject] @{
             Repo    = $allRepos[$i].html_url
+            FullName = $allrepos[$i].full_name
             Description = $allRepos[$i].description
             HasPull       = $allRepos[$i].permissions.pull
             HasTriage = $allRepos[$i].permissions.triage
@@ -49,8 +50,9 @@ for ($i =0; $i -lt $allRepos.Length; $i++)
 # Convert 'legacy internal' repos to 'private'
 $body = '{"visibility": "internal"}'
 
-foreach ($repo in $collection2)
+foreach ($item in $collection2)
 {
-    $api2 = $apiBase + "repos/$($allrepos[$i].full_name)"
-    $call = Invoke-RestMethod -Method Patch -Uri $api2 -Body $body -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"}
+    $api3 = $apiBase + "repos/$($item.FullName)"
+    echo $api3
+    Invoke-RestMethod -Method Patch -Uri $api3 -Body $body -Headers @{Authorization="Token $token"; Accept="application/vnd.github.nebula-preview+json"}
 }
