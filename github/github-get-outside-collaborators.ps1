@@ -89,7 +89,6 @@ for ($i = 0; $i -lt $fullTable2.Length; $i++)
   }
 }
 
-
 # Summaraize outside collabs + permissions and repo names into a table.
 foreach ($item in $fulltable)
 {
@@ -106,7 +105,7 @@ foreach ($item in $fulltable)
 # Get the repo admins
 foreach ($repo in $collection)
 {
-    $api2 = $apiBase + "repos/equinor/$($repo.Name)/collaborators" #GET /collabs of repo with permissions
+    $api2 = $apiBase + "repos/$($repo.RepoName)/collaborators" #GET /collabs of repo with permissions
     $call = Invoke-RestMethod -Method Get -Uri $api2 -Headers @{Authorization="Token $token"}
 
     $admins = ""
@@ -120,7 +119,7 @@ foreach ($repo in $collection)
                 {
                     if ($user.login -eq $id.GithubLogin)
                     {
-                        $adminEmails += $id.SamlIdentity + "; "
+                        $adminEmails += $id.SamlIdentity + ", "
                         break
                     }
                 }
@@ -128,9 +127,15 @@ foreach ($repo in $collection)
                 $admins += $user.login + ", "
             }
         }
+
+        if ($adminEmails)
+        {
+            $adminEmails = $adminEmails.Substring(0, $adminEmails.length-2) #Remove last comma and space
+        }
+
         $repo | Add-Member -NotePropertyName "RepoAdmins" -NotePropertyValue $admins
         $repo | Add-Member -NotePropertyName "RepoAdminsEmail" -NotePropertyValue $adminEmails   
-        $repo | Add-Member -NotePropertyName "RepoSettingsUrl" -NotePropertyValue "https://github.com/equinor/$($repo.Name)/settings/access"
+        $repo | Add-Member -NotePropertyName "RepoSettingsUrl" -NotePropertyValue "https://github.com/equinor/$($repo.RepoName)/settings/access"
 }
 
 $collection | export-excel
