@@ -31,23 +31,26 @@ $cred = Get-Credential -username $userFrom
 
 for ($i = 0; $i -lt $emails.Length; $i++) { 
 
-    Write-host "Sending email to users: $($emails[$i])"
+    Write-host "Sending email to users: $($emails[$i]) regarding repo $($list.RepoName[$i])"
 
-    Send-MailMessage -From "GM IT Toolbox <gm_toolbox@equinor.com>" -To $emails[$i] -Subject "Action required for your Github account $($users[$i])" `
-    -Cc $userFrom -Body "
+    if ($emails[$i] -ne $null -and $emails[$i] -ne "")
+    {
+        Send-MailMessage -From "GM IT Toolbox <gm_toolbox@equinor.com>" -To $emails[$i] -Subject "Action required for your Github account $($users[$i])" `
+        -Cc $userFrom -Body "
 
-    This is a quarterly review of repo permissions for outside collaborators to Github repos.
-    You are receiving this email because you have admin permissions to the repo: $($list.RepoName[$i]) which gives access to outside collaborators.
+        This is a quarterly review of repo permissions for outside collaborators to Github repos.
+        You are receiving this email because you have admin permissions to the repo: $($list.RepoName[$i]) which gives access to outside collaborators.
 
-    The repo currently has the following outside collaborators: 
-    $($list.OutsideCollaborators[$i])
-    with the repo permissions: 
-    $($list.CollabsPermissions[$i])
+        The repo currently has the following outside collaborators: 
+        $($list.OutsideCollaborators[$i])
+        with the repo permissions: 
+        $($list.CollabsPermissions[$i])
 
-    Please review the access settings at $($list.RepoSettingsUrl[$i])
+        Please review the access settings at $($list.RepoSettingsUrl[$i])
 
-    If you have any questions, either reach out to @toolbox in the #sdpteam channel on https://equinor.slack.com, or reply to this email." `
-    -SmtpServer "mrrr.statoil.com" -Port 25 -Credential $cred -UseSsl
+        If you have any questions, either reach out to @toolbox in the #sdpteam channel on https://equinor.slack.com, or reply to this email." `
+        -SmtpServer "mrrr.statoil.com" -Port 25 -Credential $cred -UseSsl
+    }
 }
 
 if ($?) 

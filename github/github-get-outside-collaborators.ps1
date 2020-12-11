@@ -21,9 +21,8 @@ $body = @'
 {"query":"query { organization(login: \"Equinor\") { repositories(first: 100) { edges { node { name collaborators(affiliation: OUTSIDE) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
 '@
 
-#Do
-
-#{
+Do
+{
     $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -Headers @{Authorization="Token $token"} -ContentType "application/json"
 
     $offset = $response.data.organization.repositories.pageInfo.endCursor
@@ -43,7 +42,7 @@ $body = @'
 
     echo "Member Page completed. Next iteration: "
 
-#} While ($hasNextPage) 
+} While ($hasNextPage) 
 
 $apiBase = "https://api.github.com/"
 
