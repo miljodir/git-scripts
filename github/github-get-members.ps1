@@ -1,6 +1,3 @@
-## Per September 2020, Github API does not provide a direct API to list "SAML unlinked" members. Only all members, and linked members. The diff between thoes should re-create the list of unlinked members.
-## Github also doesn't enforce users to put their Equinor email, so creating a mailing list for those users will need another lookup.
-
 $url = "https://api.github.com/graphql"
 
 if ($env:github_token)
@@ -12,45 +9,43 @@ else {
     Exit
 }
 
+$offset2 = ""
 
-$headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-$headers.Add("content-type","application/json")
-$headers.Add("Authorization","bearer $token")
+$bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100) { edges { node { samlIdentity {nameId}, user {name, login} } } pageInfo {endCursor, hasNextPage}  } } } }"}'
 
-$bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 ) { edges { node {name, login, email} } pageInfo {endCursor, hasNextPage} } } }"}'
+[array]$fullTable = New-Object PsObject -Property @{ login='' ; name='' }
+[array]$fullLogin = New-Object PsObject -Property @{ nameId = '' }
 
-$offset = ""
-
-[array]$fulltable = New-Object PsObject -Property @{ login='' ; name='' ; email=''}
+$collection = @()
 
 Do
-
 {
-    $response = Invoke-WebRequest -Uri $url -Method Post -Body $bodyA -Headers $headers
+    $resp2 = Invoke-RestMethod -Uri $url -Method Post -Body $bodyB -Headers @{Authorization="Token $token"}
 
-    $resp = $response.Content | convertfrom-json
-    $offset = $resp.data.organization.membersWithRole.pageInfo.endCursor
-    $hasNextPage = $resp.data.organization.membersWithRole.pageInfo.hasNextPage
-    $hashtable = $resp.data.organization.membersWithRole.edges.node
+    $offset2 = $resp2.data.organization.samlIdentityProvider.externalIdentities.pageInfo.endCursor
+    $hasNextPage2 = $resp2.data.organization.samlIdentityProvider.externalIdentities.pageInfo.hasNextPage
+    $hashtable2 = $resp2.data.organization.samlIdentityProvider.externalIdentities.edges.node
 
-    $bodyA = '{"query":"query { organization(login: \"Equinor\"){ membersWithRole(first: 100 after: \"$offset\") { edges { node {name, login, email} } pageInfo {endCursor, hasNextPage} } } }"}'
-    $bodyA = $ExecutionContext.InvokeCommand.ExpandString($bodyA)
+    $bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvider { ssoUrl, externalIdentities(first: 100 after: \"$offset2\") { edges { node { samlIdentity {nameId}, user {name, login} } } pageInfo {endCursor, hasNextPage}  } } } }"}'
+    $bodyB = $ExecutionContext.InvokeCommand.ExpandString($bodyB)
 
-    echo "Has next page: $hasNextPage"
-    echo "offset: $offset"
+    echo "Has next page: $hasNextPage2"
 
-    $fulltable += $hashtable
+    echo "offset: $offset2"
+    $fullTable += $hashtable2.user
+    $fullLogin += $hashtable2.samlIdentity
 
-    echo "Member Page completed. Next iteration: "
+    echo "SAML Page completed. Next iteration: "
 
-} While ($hasNextPage) 
+} While ($hasNextPage2) 
 
-#echo $fulltable
-
-$fulltable | foreach{
-     if ($_.email.endswith("@equinor.com"))
-     { echo $_.email}
+for ($i = 0; $i -lt $fullTable.Length; $i++)
+{
+  $collection += [pscustomobject] @{
+    FullName  = $fullTable[$i].name
+    GithubLogin  = $fullTable[$i].login
+    SamlIdentity = $fullLogin[$i].nameId
+  }
 }
 
-
-#$fulltable | Export-Excel
+$collection | Export-Excel
