@@ -134,7 +134,7 @@ foreach ($repo in $collection)
 
         $repo | Add-Member -NotePropertyName "RepoAdmins" -NotePropertyValue $admins
         $repo | Add-Member -NotePropertyName "RepoAdminsEmail" -NotePropertyValue $adminEmails   
-        $repo | Add-Member -NotePropertyName "RepoSettingsUrl" -NotePropertyValue "https://github.com/equinor/$($repo.RepoName)/settings/access"
+        $repo | Add-Member -NotePropertyName "RepoSettingsUrl" -NotePropertyValue "https://github.com/$($repo.RepoName)/settings/access"
 }
 
 $collection | export-excel
