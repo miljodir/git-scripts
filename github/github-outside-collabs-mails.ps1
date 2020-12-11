@@ -13,7 +13,7 @@ else
 
 $userFrom = "gm_toolbox@equinor.com"
 $excelFile = "C:\appl\outsidecollabs.xlsx"
-$list = Import-Excel -Path $excelFile -WorksheetName Sheet2
+$list = Import-Excel -Path $excelFile
 
 if ($?)
 
@@ -37,9 +37,6 @@ for ($i = 0; $i -lt $emails.Length; $i++) {
     {
         Send-MailMessage -From "GM IT Toolbox <gm_toolbox@equinor.com>" -To $emails[$i].Split(", ") -Subject "Quarterly access review of repo: $($list.RepoName[$i])" `
         -Cc $userFrom -Body "
-
-        Dette er en test - Audun
-
         This is a quarterly review of repo permissions for outside collaborators to Github repos.
         You are receiving this email because you have admin permissions to the repo: $($list.RepoName[$i]) which gives access to outside collaborators.
 
