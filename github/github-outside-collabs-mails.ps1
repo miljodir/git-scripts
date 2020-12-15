@@ -46,7 +46,10 @@ for ($i = 0; $i -lt $emails.Length; $i++) {
 
         Please review the access settings at $($list.RepoSettingsUrl[$i])
 
-        If you have any questions, either reach out to @toolbox in the #sdpteam channel on https://equinor.slack.com, or reply to this email." `
+        If one or more of the persoanl user accounts listed above has an @equinor.com email address, please ask for the user to be converted to a regular Github organization member instead of being listed as an outside collaborator.
+        This is valid both for internal and external employees.
+
+        If you have any questions, either reach out to @toolbox in the #sdpteam channel on Slack - https://equinor.slack.com/archives/C02JJGV05 , or reply to this email." `
         -SmtpServer "mrrr.statoil.com" -Port 25 -Credential $cred -UseSsl
     }
 }
