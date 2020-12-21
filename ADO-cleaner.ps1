@@ -9,7 +9,7 @@ else {
 
 # List all ADO orgs
 
-$csv = Import-Csv -Path "C:\maps\orgs2.csv" | sort-object Url
+$csv = Import-Csv -Path "C:\maps\orgs.csv" | sort-object Url
 
 $emptyOrgs = @()
 $populatedOrgs = @()
@@ -39,5 +39,4 @@ $globalProjects
 
 echo ""
 
-echo "The following orgs are empty:"
-echo $emptyOrgs
+$emptyOrgs | export-excel
