@@ -28,6 +28,8 @@ foreach ($org in $csv)
     $hasAzArtifacts = $false
     $hasProject = $false
 
+    try {
+
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
     $localProjects = Get-VSTeamProject
 
@@ -85,7 +87,11 @@ foreach ($org in $csv)
         }
         # Check if there are Azure Artifacts
 
-        $packages = Get-VSTeamFeed | Get-VSTeamPackage
+        try {$packages = Get-VSTeamFeed | Get-VSTeamPackage
+        }
+        catch {
+            echo "Error fetching packages from feed"
+        }
         if (!$packages)
         {
             Write-Host "Org $($org.'Organization Name') does not contain Az Artifacts (Packages)" -ForegroundColor Green
@@ -105,6 +111,12 @@ foreach ($org in $csv)
             HasGitHistory = $hasGitHistory
             HasAzArtifacts = $hasAzArtifacts
     }
+
+    }
+    catch {
+        echo "Catching a forced disconnection.."
+    }
+
 }
 
 $excel = $collection| export-excel -WorksheetName "ADO" -AutoSize -TableName Table1 -PassThru
