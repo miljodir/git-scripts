@@ -30,7 +30,7 @@ foreach ($org in $csv)
     else {
         echo "Org $($org.'Organization Name') contains one or more projects and must be further reviewed before removal."
         $populatedOrgs += $org.'Organization Name'
-        $globalProjects += ($org.Url + $localProjects)
+        $globalProjects += ($org.Url + $localProjects.Name)
     }
 }
 
@@ -40,3 +40,4 @@ $globalProjects
 echo ""
 
 $emptyOrgs | export-excel
+$globalProjects | export-excel
