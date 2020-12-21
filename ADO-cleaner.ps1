@@ -1,3 +1,5 @@
+$ErrorActionPreference = "Continue"
+
 if ($env:ado_pat)
 {
     $token = $env:ado_pat
@@ -9,7 +11,7 @@ else {
 
 # List all ADO orgs
 
-$csv = Import-Csv -Path "C:\maps\orgs2.csv" | sort-object Url
+$csv = Import-Csv -Path "C:\maps\orgs.csv" | sort-object Url
 
 $emptyOrgs = @()
 $populatedOrgs = @()
@@ -24,6 +26,7 @@ foreach ($org in $csv)
     $hasPipelines = $false
     $hasWorkItems = $false
     $hasAzArtifacts = $false
+    $hasProject = $false
 
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
     $localProjects = Get-VSTeamProject
@@ -34,6 +37,7 @@ foreach ($org in $csv)
         $emptyOrgs += $org.Url + "_settings/organizationOverview"
     }
     else {
+        $hasProject = $true
         Write-Host "Org $($org.'Organization Name') contains one or more projects and will be reviewed more closely:" -ForegroundColor Yellow
         $populatedOrgs += $org.'Organization Name'
         $globalProjects += ($org.Url + $localProjects.Name)
@@ -90,19 +94,29 @@ foreach ($org in $csv)
             $hasAzArtifacts = $true
             Write-Host "Org $($org.'Organization Name') has one or more Az Artifacts (Packages)" -ForegroundColor Red
         }
-
-
+    }
         # Format to excel sheet
         $collection += [pscustomobject] @{
             OrgName = $org.'Organization Name'
             SettingsUrl = $org.Url + "_settings/organizationOverview"
+            HasProject    = $hasProject
             HasPipelines  = $hasPipelines
             HasWorkItems  = $hasWorkItems
             HasGitHistory = $hasGitHistory
             HasAzArtifacts = $hasAzArtifacts
     }
-
-    }
 }
 
-$collection | export-excel
+$excel = $collection| export-excel -WorksheetName "ADO" -AutoSize -TableName Table1 -PassThru
+
+$ws = $excel.Workbook.Worksheets["ADO"]
+$lastRow = $ws.Dimension.End.Row
+
+Add-ConditionalFormatting -WorkSheet $ws -address "C2:C$Lastrow" -RuleType Equal -ConditionValue "=FALSE" -BackgroundColor Green
+
+Add-ConditionalFormatting -WorkSheet $ws -address "D2:D$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
+Add-ConditionalFormatting -WorkSheet $ws -address "E2:E$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
+Add-ConditionalFormatting -WorkSheet $ws -address "F2:F$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
+Add-ConditionalFormatting -WorkSheet $ws -address "G2:G$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
+
+Close-ExcelPackage -Show $excel
