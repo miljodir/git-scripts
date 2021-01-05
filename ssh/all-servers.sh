@@ -16,5 +16,6 @@ vm36.sdp.equinor.com
 for i in "${servers[@]}"
 do
    : 
-    echo "./ca.crt $i:/etc/sensu/ssl/"
+    echo "Rsyncing ./ca.crt from localhost to $i:/etc/sensu/ssl/ ..."
+    rsync -a ./ca.crt $i:/etc/sensu/ssl/
 done
