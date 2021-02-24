@@ -6,8 +6,6 @@ $csv = Import-Csv -Path "C:\maps\orgs.csv" | sort-object Url
 
 $collection = @()
 
-echo $csv[0].Url
-
 foreach ($org in $csv)
 {
     echo "Checking org:" $org.'Organization Name'
@@ -21,6 +19,7 @@ foreach ($org in $csv)
                 OrgName = $org.'Organization Name'
                 UserName = $user.user.principalName
             }
+            az devops user remove --user $user.user.principalName --org $org.Url -y
         }
     }
 }
