@@ -13,7 +13,7 @@ foreach ($org in $csv)
 
     foreach ($user in $users.items)
     {
-        if ($user.user.principalName.Contains("statoil"))
+        if ($user.user.principalName.EndsWith("@statoil.com"))
         {
             $collection += [pscustomobject] @{
                 OrgName = $org.'Organization Name'
