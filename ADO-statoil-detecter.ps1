@@ -10,7 +10,7 @@ $400DaysAgo = [DateTime]::UtcNow.AddDays(-400)
 foreach ($org in $csv)
 {
     echo "Checking org:" $org.Url
-    $users = az devops user list --org $org.Url | ConvertFrom-Json | select items
+    $users = az devops user list --top 1400 --org $org.Url | ConvertFrom-Json | select items
 
     foreach ($user in $users.items)
     {
