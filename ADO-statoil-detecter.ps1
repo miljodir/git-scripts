@@ -24,4 +24,4 @@ foreach ($org in $csv)
         }
     }
 }
-echo $collection
+$collection | export-excel
