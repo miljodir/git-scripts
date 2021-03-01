@@ -20,18 +20,20 @@ $newAdmin = "STEFOR@equinor.com"
 
 foreach ($org in $csv)
 {
-    echo "Adding to org:" $org.Url
+    echo "Updating memberships in org: $($org.Url) "
     az devops user add --email-id $newAdmin --license-type express --org $org.Url --send-email-invite false
 
     if ($?)
-    echo "Added $($user) to $($org.Url)"
+    { echo "Added $($user) to $($org.Url)" }
 
     foreach ($user in $existingAdmins)
     {
         az devops user update --user $user --license-type express --organization $org.Url
 
-        if $(?)
+        if ($?)
+        {
         echo "Ensured $($user) has license in org $($org.Url)"
+        }
     }
 
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
