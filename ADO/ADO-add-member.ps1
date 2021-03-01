@@ -36,9 +36,14 @@ foreach ($org in $csv)
         }
     }
 
+try {
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
 
     $user = Get-VSTeamUser | ? DisplayName -eq 'Stefan Forbergskog'
     $group = Get-VSTeamGroup | ? DisplayName -eq 'Project Collection Administrators'
     Add-VSTeamMembership -MemberDescriptor $user.Descriptor -ContainerDescriptor $group.Descriptor
+}
+    catch {
+        echo "Probably org is deleted or someone threw you out"
+     }
 }
