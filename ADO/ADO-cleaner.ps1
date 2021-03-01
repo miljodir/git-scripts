@@ -59,10 +59,10 @@ foreach ($org in $csv)
             if ($testPlanResp.value)
             {
                 $hasTestPlans = $true
-                Write-Host "$($proj) in Org $($org.'Organization Name') contains one or more test plans!" -ForegroundColor Red
+                Write-Host "The Project $($proj) in Org $($org.'Organization Name') contains one or more test plans!" -ForegroundColor Red
             }
             else {
-                Write-Host "Org $($org.'Organization Name') does not contain a test plan" -ForegroundColor Green
+                Write-Host "The Project $($proj) in Org $($org.'Organization Name') does not contain a test plan" -ForegroundColor Green
             }
         }
 
