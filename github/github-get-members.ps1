@@ -16,7 +16,7 @@ $bodyB = '{"query":"query { organization(login: \"Equinor\") { samlIdentityProvi
 [array]$fullTable = New-Object PsObject -Property @{ login='' ; name='' }
 [array]$fullLogin = New-Object PsObject -Property @{ nameId = '' }
 
-$collection = @()
+$collection = New-Object 'system.collections.generic.dictionary[string,string]'
 
 Do
 {
@@ -42,7 +42,6 @@ Do
 for ($i = 0; $i -lt $fullTable.Length; $i++)
 {
   $collection += [pscustomobject] @{
-    FullName  = $fullTable[$i].name
     GithubLogin  = $fullTable[$i].login
     SamlIdentity = $fullLogin[$i].nameId
   }

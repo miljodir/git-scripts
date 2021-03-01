@@ -34,7 +34,7 @@ for ($i = 0; $i -lt $emails.Length; $i++) {
     Write-host "Sending email to user: $($emails[$i]) with Github username: $($users[$i])"
 
     Send-MailMessage -From "GM IT Toolbox <gm_toolbox@equinor.com>" -To $emails[$i] -Subject "Action required for your Github account $($users[$i])" `
-    -Cc $userFrom -Body "
+     -Body "
 
     You are receiving this email because you are part of Equinor's organization on Github, as we believe the Github account $($users[$i]) https://github.com/$($users[$i]) belongs to you.
     If this information is incorrect, or you do not use Github anymore, you may safely ignore this email.
