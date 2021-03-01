@@ -30,6 +30,7 @@ foreach ($org in $csv)
     $hasAzArtifacts = $false
     $hasProject = $false
 
+    try {
 
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
     $localProjects = Get-VSTeamProject
@@ -126,7 +127,10 @@ foreach ($org in $csv)
             HasGitHistory = $hasGitHistory
             HasAzArtifacts = $hasAzArtifacts
     }
-
+    }
+    catch {
+        echo "Catching a forced disconnection.."
+    }
 }
 
 $excel = $collection| export-excel -WorksheetName "ADO" -AutoSize -TableName Table1 -PassThru
