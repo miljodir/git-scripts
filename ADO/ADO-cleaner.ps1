@@ -3,6 +3,7 @@ $ErrorActionPreference = "Continue"
 if ($env:ado_pat)
 {
     $token = $env:ado_pat
+    $encodedPat  = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":"+$token))
 }
 else {
     Write-Host "You must set the 'ado_pat' env variable!" -ForegroundColor Red
@@ -24,11 +25,11 @@ foreach ($org in $csv)
 {
     $hasGitHistory = $false
     $hasPipelines = $false
+    $hasTestPlans = $false
     $hasWorkItems = $false
     $hasAzArtifacts = $false
     $hasProject = $false
 
-    try {
 
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
     $localProjects = Get-VSTeamProject
@@ -44,11 +45,24 @@ foreach ($org in $csv)
         $populatedOrgs += $org.'Organization Name'
         $globalProjects += ($org.Url + $localProjects.Name)
         $pipelines = @()
+        $testplans = @()
+
+        $none = '{"value":[],"count":0}'
 
         # Check if there are pipelines
         foreach ($proj in $localProjects)
         {
             $pipelines += Get-VSTeamBuildDefinition -ProjectName $proj.Name
+            $testPlanResp = Invoke-RestMethod -Uri ($org.Url + $proj.Name + "/_apis/test/plans?api-version=5.0") -Headers @{Authorization="Basic $encodedPat"}
+
+            if ($testPlanResp.value)
+            {
+                $hasTestPlans = $true
+                Write-Host "$($proj) in Org $($org.'Organization Name') contains one or more test plans!" -ForegroundColor Red
+            }
+            else {
+                Write-Host "Org $($org.'Organization Name') does not contain a test plan" -ForegroundColor Green
+            }
         }
 
         if (!$pipelines)
@@ -107,14 +121,10 @@ foreach ($org in $csv)
             SettingsUrl = $org.Url + "_settings/organizationOverview"
             HasProject    = $hasProject
             HasPipelines  = $hasPipelines
+            HasTestPlans = $hasTestPlans
             HasWorkItems  = $hasWorkItems
             HasGitHistory = $hasGitHistory
             HasAzArtifacts = $hasAzArtifacts
-    }
-
-    }
-    catch {
-        echo "Catching a forced disconnection.."
     }
 
 }
@@ -130,5 +140,6 @@ Add-ConditionalFormatting -WorkSheet $ws -address "D2:D$Lastrow" -RuleType Equal
 Add-ConditionalFormatting -WorkSheet $ws -address "E2:E$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
 Add-ConditionalFormatting -WorkSheet $ws -address "F2:F$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
 Add-ConditionalFormatting -WorkSheet $ws -address "G2:G$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
+Add-ConditionalFormatting -WorkSheet $ws -address "H2:H$Lastrow" -RuleType Equal -ConditionValue "=TRUE" -BackgroundColor Red
 
 Close-ExcelPackage -Show $excel
