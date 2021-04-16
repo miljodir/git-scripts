@@ -9,14 +9,12 @@ else {
     Exit
 }
 
-$csv = Import-Csv -Path "C:\maps\orgsv2.csv" | sort-object Url
+$csv = Import-Csv -Path "C:\maps\orgsv5.csv" | sort-object Url
 
 $existingAdmins = @(
-"smnil@equinor.com"
-"MMYH@equinor.com"
 )
 
-$newAdmin = "STEFOR@equinor.com"
+$newAdmin = "HAKE@equinor.com"
 
 foreach ($org in $csv)
 {
@@ -39,7 +37,7 @@ foreach ($org in $csv)
 try {
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
 
-    $user = Get-VSTeamUser | ? DisplayName -eq 'Stefan Forbergskog'
+    $user = Get-VSTeamUser | ? DisplayName -eq 'Håkon Eriksson'
     $group = Get-VSTeamGroup | ? DisplayName -eq 'Project Collection Administrators'
     Add-VSTeamMembership -MemberDescriptor $user.Descriptor -ContainerDescriptor $group.Descriptor
 }
