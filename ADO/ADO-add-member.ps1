@@ -11,9 +11,6 @@ else {
 
 $csv = Import-Csv -Path "C:\maps\orgsv5.csv" | sort-object Url
 
-$existingAdmins = @(
-)
-
 $newAdmin = "HAKE@equinor.com"
 
 foreach ($org in $csv)
@@ -23,16 +20,6 @@ foreach ($org in $csv)
 
     if ($?)
     { echo "Added $($user) to $($org.Url)" }
-
-    foreach ($user in $existingAdmins)
-    {
-        az devops user update --user $user --license-type express --organization $org.Url
-
-        if ($?)
-        {
-        echo "Ensured $($user) has license in org $($org.Url)"
-        }
-    }
 
 try {
     Set-VSTeamAccount -Account $org."Organization Name" -PersonalAccessToken $token
