@@ -1,0 +1,1 @@
+Scripts in this folders are used for Azure DevOps automation across several orgs.
