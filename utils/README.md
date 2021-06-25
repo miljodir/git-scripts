@@ -1,0 +1,1 @@
+Scripts in this folder are not regularly used, but can be used for inspiration
