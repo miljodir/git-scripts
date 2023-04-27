@@ -1,1 +1,0 @@
-This C# project was created in order to ensure items in our internal Gitlab instance were marked with "internal" visibility rather than "public" visibility before we migrated the Gitlab instance to Azure public cloud.
