@@ -1,4 +1,0 @@
-# Copy/paste into $HOME/.ssh/config to allow git clone over ssh to gitlab.com
-Host *gitlab.com
-  ProxyCommand=nc --proxy www-proxy.statoil.no:80 %h %p
-  ServerAliveInterval 10

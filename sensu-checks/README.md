@@ -1,1 +1,0 @@
-Custom made sensu checks which are in turn distributed by Puppet or similar configuration management tool.
