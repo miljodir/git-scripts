@@ -17,9 +17,9 @@ $url = "https://api.github.com/graphql"
 $offset = ""
 [array]$fulltable = New-Object PsObject -Property @{name = ''; collaborators = '' }
 
-# Fetch all repos, get all outside collabs
+# Fetch all repos, get all DIRECT collabs
 $body = @'
-{"query":"query { organization(login: \"miljodir\") { repositories(first: 100) { edges { node { name collaborators(affiliation: OUTSIDE) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
+{"query":"query { organization(login: \"miljodir\") { repositories(first: 100) { edges { node { name collaborators(affiliation: DIRECT) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
 '@
 
 Do {
@@ -30,7 +30,7 @@ Do {
     $hashtable = $response.data.organization.repositories.edges.node
 
     $body = @'
-    {"query":"query { organization(login: \"miljodir\") { repositories(first: 100 after: \"$offset\") { edges { node { name collaborators(affiliation: OUTSIDE) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
+    {"query":"query { organization(login: \"miljodir\") { repositories(first: 100 after: \"$offset\") { edges { node { name collaborators(affiliation: DIRECT) { edges { permission node {login}}}}} pageInfo {endCursor, hasNextPage}}}}"}
 '@
 
     $body = $ExecutionContext.InvokeCommand.ExpandString($body)
@@ -86,13 +86,13 @@ for ($i = 0; $i -lt $fullTable2.Length; $i++) {
     }
 }
 
-# Summaraize outside collabs + permissions and repo names into a table.
+# Summaraize DIRECT collabs + permissions and repo names into a table.
 foreach ($item in $fulltable) {
     if ($null -ne $item.collaborators.edges.node.login) {
         $collection += [pscustomobject] @{
-            RepoName             = "miljodir/$($item.name)"
-            OutsideCollaborators = ($item.collaborators.edges.node.login -join ', ')
-            CollabsPermissions   = ($item.collaborators.edges.permission -join ', ')
+            RepoName            = "miljodir/$($item.name)"
+            DIRECTCollaborators = ($item.collaborators.edges.node.login -join ', ')
+            CollabsPermissions  = ($item.collaborators.edges.permission -join ', ')
         }
     }
 }
