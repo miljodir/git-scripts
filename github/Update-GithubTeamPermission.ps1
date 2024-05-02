@@ -4,17 +4,17 @@ Update the permissions of a Github team across all repositories it has access to
 #>
 
 param (
-  [string] [Parameter(Mandatory=$true)] $team = "myteam",
-  [string] [Parameter(Mandatory=$true)] $org = "miljodir",
-  [string] [Parameter(Mandatory=$true)] $role = "SecurityAlertManagement"
+  [string] [Parameter(Mandatory=$false)] $team = "mysecurityteam",
+  [string] [Parameter(Mandatory=$false)] $org = "miljodir",
+  [string] [Parameter(Mandatory=$false)] $role = "SecurityAlertManagement" # Custom or built-in role.
 )
 
-#$internalrepos = gh api /orgs/miljodir/teams/$team/repos --paginate | ConvertFrom-Json
+$internalrepos = gh api /orgs/$org/teams/$team/repos --paginate | ConvertFrom-Json
 
-#$internalrepos2 = gh api /orgs/miljodir/teams/miljodir-internal/repos | ConvertFrom-Json
+#$internalrepos2 = gh api /orgs/$org/teams/$team/repos | ConvertFrom-Json
 
 #foreach ($repo in $internalrepos2[0])
-foreach ($repo in $internalrepos[0])
+foreach ($repo in $internalrepos)
 {
-    gh api --method PUT /orgs/$org/teams/$team/repos/$($repo.full_name) -f "role_name=$($role)"
+    gh api --method PUT /orgs/$org/teams/$team/repos/$($repo.full_name) -f "permission=$role"
 }
