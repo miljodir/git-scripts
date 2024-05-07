@@ -4,7 +4,7 @@ Update the permissions of a Github team across all repositories it has access to
 #>
 
 param (
-  [string] [Parameter(Mandatory=$false)] $team = "mysecurityteam",
+  [string] [Parameter(Mandatory=$false)] $team = "security-managers-bouvet-portfolio",
   [string] [Parameter(Mandatory=$false)] $org = "miljodir",
   [string] [Parameter(Mandatory=$false)] $role = "SecurityAlertManagement" # Custom or built-in role.
 )
