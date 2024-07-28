@@ -5,7 +5,7 @@ Dismiss a specific code scanning alert across all repositories in an org
 
 param (
   [string] [Parameter(Mandatory=$false)] $org = "miljodir",
-  [string] [Parameter(Mandatory=$false)] $tool = "checkov"
+  [string] [Parameter(Mandatory=$false)] $tool = "terrascan"
 )
 
 $ids = @(
@@ -41,13 +41,18 @@ $ids = @(
 "CKV_GHA_7"
 )
 
-$alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?tool_name=$tool&state=open" --paginate | ConvertFrom-Json
+$alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open" --paginate | ConvertFrom-Json
 
     foreach ($alert in $alerts)
     {
-        if ($alert.rule.id -in $ids)
+
+        if ( $alert.most_recent_instance.location.path -like "*-values.yaml")
         {
-            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert deemed not relevant by the MAP team, is a false positive, or is covered by other measures"
+            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=The alert detected a potential misconfig in the -values.yaml file, which only contains overrides and cannot be evaulated by itself"
+        }
+        elseif ($alert.rule.id -in $ids)
+        {
+            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert is deemed not relevant by the MAP team, is a false positive, or is covered by other measures"
         }
     }
 
