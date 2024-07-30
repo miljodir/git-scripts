@@ -51,13 +51,21 @@ $ids = @(
 "CKV_AZURE_39",
 "CKV_K8S_40",
 "CKV2_GIT_1",
-"CKV_K8S_13"
+"CKV_K8S_13",
+"CKV_AZURE_199",
+"CKV_AZURE_202"
 )
 
 $devOnlyIds = @(
     "azure-storage-default-action-deny",
     "azure-keyvault-specify-network-acl",
-    "azure-database-no-public-access",
+    "azure-database-no-public-access"
+)
+
+$devTestIds = @(
+    # kv purge protection
+    "CKV_AZURE_42",
+    "CKV_AZURE_110"
 )
 
 $alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open" --paginate | ConvertFrom-Json
@@ -69,9 +77,13 @@ $alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open" --pag
         {
             gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=The alert detected a potential misconfig in the -values.yaml file, which only contains overrides and cannot be evaulated by itself"
         }
-        elseif ( $alert.most_recent_instance.location.path -like "*dev/*.tf" -and $alert.rule.id -in $devOnlyIds)
+        elseif ( $alert.most_recent_instance.location.path -like "*dev/*" -and $alert.rule.id -in $devOnlyIds)
         {
             gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=won't fix" -f "dismissed_comment=This alert is acceptable in dev environments"
+        }
+        elseif ( $alert.most_recent_instance.location.path -like "*dev/*" -or $alert.most_recent_instance.location.path -like "*test/*"   -and $alert.rule.id -in $devTestIds)
+        {
+            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert is acceptable in dev environments"
         }
         elseif ($alert.rule.id -in $ids)
         {
