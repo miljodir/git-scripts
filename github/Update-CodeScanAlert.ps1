@@ -53,7 +53,10 @@ $ids = @(
 "CKV2_GIT_1",
 "CKV_K8S_13",
 "CKV_AZURE_199",
-"CKV_AZURE_202"
+"CKV_AZURE_202",
+"AC_K8S_0087",
+"CKV2_AZURE_35",
+"CKV_AZURE_93"
 )
 
 $devOnlyIds = @(
