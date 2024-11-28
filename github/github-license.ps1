@@ -18,3 +18,5 @@ $latestPerUser = $csv | Group-Object 'User login' | ForEach-Object {
 
 # Output the result
 $latestPerUser | Select-Object 'User login', 'Organization / repository', 'Last pushed date',  'Last pushed email' | Sort-Object 'Last pushed date' |  Format-Table -AutoSize
+
+Write-Host "$($latestPerUser.Count) users found in CSV file"
