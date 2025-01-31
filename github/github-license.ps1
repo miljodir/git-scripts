@@ -5,9 +5,9 @@
 
 
 param (
-    [string] [Parameter(Mandatory=$false)] $csvPath = "C:\Users\audun\Downloads\ghas_active_committers_miljodir_2024-11-28T0312.csv",
-    [string] [Parameter(Mandatory=$false)] $csvPath2 = "C:\Users\audun\Downloads\export-miljodir-1732787819.csv",
-    [string] [Parameter(Mandatory=$false)] $copilotCsvPath = "C:\Users\audun\Downloads\miljodir-seat-usage-1733728035.csv"
+    [string] [Parameter(Mandatory=$false)] $csvPath = "C:\Users\audun\Downloads\ghas_active_committers_miljodir_2025-01-31T0015.csv",
+    [string] [Parameter(Mandatory=$false)] $csvPath2 = "C:\Users\audun\Downloads\export-miljodir-1738311321.csv",
+    [string] [Parameter(Mandatory=$false)] $copilotCsvPath = "C:\Users\audun\Downloads\miljodir-seat-usage-1738311386.csv"
 )
 
 $csv = import-csv -Path $csvPath
@@ -40,3 +40,27 @@ $nonPushingMembers | select "GitHub com login", "GitHub com saml name", "Github 
 # Output the result
 #Write-Host "$($latestPerUser.Count) users found commiting code in the last 3 months."
 #$latestPerUser | Select-Object 'User login', 'Organization / repository', 'Last pushed date',  'Last pushed email' | Sort-Object 'Last pushed date' |  Format-Table -AutoSize
+
+# Successful Github Logins
+$githubLoginQuery = @"
+SigninLogs
+| where AppDisplayName == "GitHub Enterprise Cloud"
+| where TimeGenerated >= ago(180d)
+| where ResultType !in ("50074","500121","70044","50105","50126")
+| summarize arg_max(TimeGenerated, *) by UserPrincipalName
+| sort by TimeGenerated asc
+| project UserPrincipalName
+"@
+
+# Define the workspace and resource group
+$workspaceId = "xxx"
+
+# Execute the query
+$githubLoginsList = (Invoke-AzOperationalInsightsQuery -WorkspaceId $workspaceId -Query $githubLoginQuery).Results | Select-Object -ExpandProperty UserPrincipalName
+$nonPushingNamesList = $nonPushingMembers | Select-Object -ExpandProperty 'GitHub com saml name'
+
+$missingNames = $nonPushingNamesList | Where-Object { -not ($githubLoginsList -contains $_) }
+
+# Output the missing names
+Write-Host "The following names have not signed in to Github for at least the past 5 months" -ForegroundColor Red
+$missingNames | ForEach-Object { Write-Host $_ }
