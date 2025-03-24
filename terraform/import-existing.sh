@@ -7,7 +7,7 @@ generate_import_block() {
     jq -r --arg name "$group_name" '
         [.resources[] | select(.type=="azuread_group" and .name==$name)] 
         | .[] 
-        | "import { to = \(.module).azuread_group_without_members.\($name) id = \"groups/\(.instances[0].attributes.object_id)\"}"
+        | "import {\n  to = \(.module).azuread_group_without_members.\($name)\n  id = \"groups/\(.instances[0].attributes.object_id)\"\n}"
     ' terraform.tfstate >> import-blocks.tf
 }
 
