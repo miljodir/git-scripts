@@ -92,7 +92,7 @@ function Set-OSSnapshotPolicy {
         }
     }
 
-    return Invoke-OsApi -Method POST -Path "/_plugins/_sm/policies/$Name" -Body $body
+    return Invoke-OsApi -Method POST "/_plugins/_sm/policies/$Name" -Body $body
 }
 
 function Set-OSNightlySnapshotPolicy {
@@ -104,7 +104,7 @@ function Set-OSNightlySnapshotPolicy {
     return Set-OSSnapshotPolicy `
         -Name "nightly-snapshots" `
         -Description "Nightly snapshots kept for 31 days" `
-        -CronExpression "0 0 2 * *" `
+        -CronExpression "0 2 * * *" `
         -MaxAge "31d" `
         -MinCount 1 `
         -MaxCount 40 `
@@ -121,7 +121,7 @@ function Set-OSMonthlySnapshotPolicy {
     return Set-OSSnapshotPolicy `
         -Name "monthly-snapshots" `
         -Description "Monthly snapshots kept for 6 months" `
-        -CronExpression "0 0 3 1 *" `
+        -CronExpression "0 2 1 * *" `
         -MaxAge "180d" `
         -MinCount 1 `
         -MaxCount 12 `
