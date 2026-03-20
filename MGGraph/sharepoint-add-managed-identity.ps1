@@ -1,29 +1,29 @@
 # This script will grant the Managed Identity the correct permissions to the SharePoint site
 
-#The user running this has to be owner of the SharePoint sitem and be sharepoint admin
+# The user running this has to be owner of the SharePoint site AND be sharepoint admin
 
 # Add the correct 'Application (APP) ID' and 'displayName' for the Managed Identity
+
+param( 
+    [string] $ApplicationId = "placeholder",
+    [string] $ApplicationDisplayName = "placeholder",
+    [string] $SharePointSiteName = "placeholdersitename",
+    [string] $AppRole = "write"
+)
+
+
 $application = @{
-    id = "APP ID"
-    displayName = "APP DISPLAY NAME"
+    id = $ApplicationId
+    displayName = $ApplicationDisplayName
 }
 
-# Add the correct role to grant the Managed Identity (read or write)
-$appRole = "write"
-
-# Add the correct SharePoint Online tenant URL and site name
-#$spoTenant = "miljodir.sharepoint.com"
-$spoSite = "SITE ID"
-
-# No need to change anything below
-#$spoSiteId = $spoTenant + ":/sites/" + $spoSite + ":"
-
 Import-Module Microsoft.Graph.Sites
-Connect-MgGraph -Scope Sites.FullControl.All
+Connect-MgGraph -Scope Sites.FullControl.All, Application.Read.All
 
-#New-MgSitePermission -SiteId $spoSiteId -Roles $appRole -GrantedToIdentities @{ Application = $application }
+$site = Invoke-MgGraphRequest -Uri "v1.0/sites?search=$($SharePointSiteName)"
+$spoSiteId = ($site.value.id -split ",")[1]
 
-New-MgSitePermission -SiteId $spoSite -Roles $appRole -GrantedToIdentities @{ Application = $application }
+New-MgSitePermission -SiteId $spoSiteId -Roles $AppRole -GrantedToIdentities @{ Application = $application }
 
 #To check the permissions run the following command
-#get-mgsitepermission -siteid $spoSite | format-list
+Get-MgSitePermission -SiteId $spoSiteId | Format-List
