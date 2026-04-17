@@ -8,7 +8,8 @@
 param (
     [string] [Parameter(Mandatory=$false)] $org = "miljodir",
     [string] [Parameter(Mandatory=$false)] $advancedSecurityProduct,
-    [string] [Parameter(Mandatory=$false)] $workspaceId = "xxx"
+    [string] [Parameter(Mandatory=$false)] $workspaceId = "xxx",
+    [int] [Parameter(Mandatory=$false)] $inactiveDays = 90
 )
 
 function Get-GitHubApiPages {
@@ -158,7 +159,7 @@ $advancedSecurityRepositories = Get-GitHubApiItems `
     -Endpoint "/orgs/$org/settings/billing/advanced-security?$($advancedSecurityQueryParameters -join '&')" `
     -CollectionProperties @("repositories")
 
-$recentActivityCutoff = (Get-Date).AddDays(-90)
+$recentActivityCutoff = (Get-Date).AddDays(-$inactiveDays)
 $recentGithubPushers = $advancedSecurityRepositories `
     | ForEach-Object { $_.advanced_security_committers_breakdown } `
     | Group-Object user_login `
@@ -231,8 +232,8 @@ $allGithubUsers = $orgMembers | Select-Object -ExpandProperty login | Sort-Objec
 # Successful Github Logins
 $githubLoginQuery = @"
 SigninLogs
-| where AppDisplayName == "GitHub Enterprise Cloud"
-| where TimeGenerated >= ago(90d)
+| where AppDisplayName startswith("GitHub Enterprise Cloud")
+| where TimeGenerated >= ago($($inactiveDays)d)
 | where ResultType !in ("50074","500121","70044","50105","50126")
 | summarize arg_max(TimeGenerated, *) by UserPrincipalName
 | sort by TimeGenerated asc
@@ -248,6 +249,6 @@ $missingNames = $allGithubUsers `
     | Select-Object 'GitHub com saml name', 'GitHub com login' `
     | ForEach-Object { $_.'GitHub com saml name' + " (" + $_.'GitHub com login' + ")" }
 
-Write-Host "`nThe following names have not signed in to the Github org for at least the past 90 days" -ForegroundColor Red
+Write-Host "`nThe following names have not signed in to the Github org for at least the past $inactiveDays days" -ForegroundColor Red
 Write-Host "Note that some users may have signed in to other orgs under the enterprise, and are still requiring a license." -ForegroundColor Yellow
 $missingNames | ForEach-Object { Write-Host $_ }
