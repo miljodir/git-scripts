@@ -6,6 +6,8 @@ Deletes ACR manifests that are not used by the configured AKS clusters.
 The script reads image references from pods and workload specs in the selected
 Kubernetes contexts, protects matching ACR tags and digests, always protects
 manifests tagged latest, and makes every other manifest eligible for deletion.
+Repositories are only cleaned when their owning Kubernetes namespace exists in
+at least one configured context, unless a repository-to-namespace mapping exists.
 Deletion is disabled by default; pass -EnableDelete to actually remove
 manifests.
 
@@ -21,10 +23,15 @@ Deletes manifests from myacr that are not referenced by the configured
 Kubernetes contexts.
 
 .EXAMPLE
+.\Cleanup-AzAcrImage.ps1 -SkipAksCredentials -EnableDelete -DeleteThrottleLimit 12
+
+Deletes unused manifests with up to 12 concurrent az delete operations.
+
+.EXAMPLE
 .\Cleanup-AzAcrImage.ps1 -SkipAksCredentials -IncludeRepositoryPrefix avdekl,testteam1
 
-Only evaluates repositories below the avdekl/ and testteam1/ prefixes, and only
-scans those Kubernetes namespaces in each configured context.
+Optionally limits cleanup to repositories below the avdekl/ and testteam1/
+prefixes, and only scans those Kubernetes namespaces in each configured context.
 
 .EXAMPLE
 .\Cleanup-AzAcrImage.ps1 -SkipAksCredentials -KubeContext d-aks,t-aks,p-aks
@@ -59,6 +66,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch] $EnableDelete,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 64)]
+    [int] $DeleteThrottleLimit = 8,
 
     [Parameter(Mandatory = $false)]
     [switch] $SkipAksCredentials
@@ -109,6 +120,100 @@ function Invoke-JsonCommand {
     return $json | ConvertFrom-Json -ErrorAction Stop
 }
 
+function Invoke-AcrRepositoryDelete {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $RegistryName,
+
+        [Parameter(Mandatory = $true)]
+        [string] $ImageName
+    )
+
+    [void] (Invoke-NativeCommand `
+        -Command { az acr repository delete --name $RegistryName --image $ImageName --yes --output none } `
+        -ErrorMessage "Failed to delete image '$ImageName'.")
+}
+
+function Invoke-ParallelAcrRepositoryDelete {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $RegistryName,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]] $ImageNames,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 64)]
+        [int] $ThrottleLimit
+    )
+
+    if ($ImageNames.Count -eq 0) {
+        return 0
+    }
+
+    if ($ThrottleLimit -eq 1 -or $PSVersionTable.PSVersion.Major -lt 7) {
+        if ($ThrottleLimit -gt 1 -and $PSVersionTable.PSVersion.Major -lt 7) {
+            Write-Warning "Parallel deletes require PowerShell 7 or newer. Falling back to sequential deletes."
+        }
+
+        $deletedCount = 0
+
+        foreach ($imageName in $ImageNames) {
+            $repositoryName = @($imageName -split "@")[0]
+            Write-Host "Deleting $($deletedCount + 1)/$($ImageNames.Count): $repositoryName"
+            Invoke-AcrRepositoryDelete -RegistryName $RegistryName -ImageName $imageName
+            $deletedCount++
+            Write-Host "Deleted $deletedCount/$($ImageNames.Count): $repositoryName"
+        }
+
+        return $deletedCount
+    }
+
+    Write-Host "Deleting $($ImageNames.Count) manifest(s) with up to $ThrottleLimit concurrent az delete operation(s)..."
+
+    $totalImageCount = $ImageNames.Count
+    $deleteItems = for ($index = 0; $index -lt $totalImageCount; $index++) {
+        [pscustomobject]@{
+            Index      = $index + 1
+            ImageName  = $ImageNames[$index]
+            Repository = @($ImageNames[$index] -split "@")[0]
+        }
+    }
+
+    $deleteResults = $deleteItems | ForEach-Object -Parallel {
+        $deleteItem = $_
+        $imageName = $deleteItem.ImageName
+
+        Write-Host "Deleting $($deleteItem.Index)/$($using:totalImageCount): $($deleteItem.Repository)"
+        $output = & az acr repository delete --name $using:RegistryName --image $imageName --yes --output none 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Deleted $($deleteItem.Index)/$($using:totalImageCount): $($deleteItem.Repository)"
+        }
+
+        [pscustomobject]@{
+            ImageName   = $imageName
+            Repository  = $deleteItem.Repository
+            DeleteIndex = $deleteItem.Index
+            ExitCode    = $LASTEXITCODE
+            Output      = ($output -join [Environment]::NewLine)
+        }
+    } -ThrottleLimit $ThrottleLimit
+
+    $failedDeletes = @($deleteResults | Where-Object { $_.ExitCode -ne 0 })
+
+    if ($failedDeletes.Count -gt 0) {
+        foreach ($failedDelete in $failedDeletes) {
+            Write-Error "Failed to delete from $($failedDelete.Repository): $($failedDelete.Output)"
+        }
+
+        throw "Failed to delete $($failedDeletes.Count) of $($ImageNames.Count) manifest(s)."
+    }
+
+    return $ImageNames.Count
+}
+
 function Get-NormalizedStringList {
     param(
         [Parameter(Mandatory = $false)]
@@ -128,7 +233,9 @@ function Get-NormalizedStringList {
         }
     }
 
-    return @($normalizedValues)
+    foreach ($normalizedValue in $normalizedValues) {
+        $normalizedValue
+    }
 }
 
 function Test-RepositoryPrefix {
@@ -195,43 +302,83 @@ function Get-FilteredImageReferenceSet {
         }
     }
 
-    return $filteredReferences
+    return ,$filteredReferences
 }
 
 function Get-KubernetesNamespaceFromRepositoryPrefix {
     param(
         [Parameter(Mandatory = $false)]
         [AllowEmptyCollection()]
-        [string[]] $IncludeRepositoryPrefix = @()
+        [string[]] $IncludeRepositoryPrefix = @(),
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyCollection()]
+        [object[]] $RepositoryNamespaceMapping = @()
     )
 
     $namespaces = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($prefix in @($IncludeRepositoryPrefix)) {
-        $namespace = @($prefix -split "/")[0]
+        $mapping = Get-RepositoryNamespaceInfo -Repository $prefix -RepositoryNamespaceMapping $RepositoryNamespaceMapping
+        $namespace = $mapping.Namespace
 
         if (-not [string]::IsNullOrWhiteSpace($namespace)) {
             [void] $namespaces.Add($namespace)
         }
     }
 
-    return @($namespaces)
+    foreach ($namespace in $namespaces) {
+        $namespace
+    }
 }
 
-function Test-KubernetesNamespaceExists {
+function Get-RepositoryNamespaceInfo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Repository,
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyCollection()]
+        [object[]] $RepositoryNamespaceMapping = @()
+    )
+
+    foreach ($mapping in @($RepositoryNamespaceMapping)) {
+        if (Test-RepositoryPrefix -Repository $Repository -IncludeRepositoryPrefix @($mapping.RepositoryPrefix)) {
+            return [pscustomobject]@{
+                RepositoryPrefix = $mapping.RepositoryPrefix
+                Namespace        = $mapping.Namespace
+                KubeContext      = @($mapping.KubeContext)
+                IsMapped         = $true
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        RepositoryPrefix = @($Repository -split "/")[0]
+        Namespace        = @($Repository -split "/")[0]
+        KubeContext      = @()
+        IsMapped         = $false
+    }
+}
+
+function Get-AvailableNamespaceContexts {
     param(
         [Parameter(Mandatory = $true)]
         [string] $Namespace,
 
         [Parameter(Mandatory = $true)]
-        [string[]] $KubectlArguments
+        [hashtable] $NamespacesByContext,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]] $KubeContext
     )
 
-    $output = Invoke-NativeCommand `
-        -Command { kubectl @KubectlArguments get namespace $Namespace --ignore-not-found --output name } `
-        -ErrorMessage "Failed to check namespace '$Namespace'."
-
-    return -not [string]::IsNullOrWhiteSpace(($output -join "").Trim())
+    foreach ($context in @($KubeContext)) {
+        if ($NamespacesByContext.ContainsKey($context) -and $NamespacesByContext[$context].Contains($Namespace)) {
+            $context
+        }
+    }
 }
 
 function Get-AcrImageReference {
@@ -425,7 +572,7 @@ function Add-ImageReferencesFromObject {
 Assert-CommandExists -Name "az"
 Assert-CommandExists -Name "kubectl"
 
-Write-Host "Starting ACR cleanup for registry '$RegistryName'. Delete enabled: $($EnableDelete.IsPresent)."
+Write-Host "Starting ACR cleanup for registry '$RegistryName'. Delete enabled: $($EnableDelete.IsPresent). Delete throttle: $DeleteThrottleLimit."
 Write-Host "Resolving login server for registry '$RegistryName'..."
 
 $loginServer = (Invoke-NativeCommand `
@@ -438,13 +585,28 @@ if ([string]::IsNullOrWhiteSpace($loginServer)) {
 
 Write-Host "Resolved login server: $loginServer"
 
-$normalizedKubeContexts = Get-NormalizedStringList -Values $KubeContext
-$normalizedIncludeRepositoryPrefix = Get-NormalizedStringList -Values $IncludeRepositoryPrefix
-$kubernetesNamespacesToScan = Get-KubernetesNamespaceFromRepositoryPrefix -IncludeRepositoryPrefix $normalizedIncludeRepositoryPrefix
+$repositoryNamespaceMapping = @(
+    [pscustomobject]@{
+        RepositoryPrefix = "cloud-platform"
+        Namespace        = "cmgt"
+        KubeContext      = @("p-aks")
+    },
+    [pscustomobject]@{
+        RepositoryPrefix = "feltstotte"
+        Namespace        = "nis"
+        KubeContext      = @()
+    }
+)
+
+$normalizedKubeContexts = @(Get-NormalizedStringList -Values $KubeContext)
+$normalizedIncludeRepositoryPrefix = @(Get-NormalizedStringList -Values $IncludeRepositoryPrefix)
+$kubernetesNamespacesToScan = @(Get-KubernetesNamespaceFromRepositoryPrefix -IncludeRepositoryPrefix $normalizedIncludeRepositoryPrefix -RepositoryNamespaceMapping $repositoryNamespaceMapping)
 
 if ($normalizedKubeContexts.Count -eq 0) {
     throw "At least one Kubernetes context must be configured."
 }
+
+Write-Host "Repository namespace mappings enabled: cloud-platform/* -> cmgt (p-aks), feltstotte/* -> nis."
 
 if (-not $SkipAksCredentials) {
     if ([string]::IsNullOrWhiteSpace($AksResourceGroup)) {
@@ -465,6 +627,7 @@ $resourceKinds = $KubernetesResourceKind -join ","
 $usedTags = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $usedDigests = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $usedTagContexts = @{}
+$namespacesByContext = @{}
 
 Write-Host "Reading Kubernetes resources from $($normalizedKubeContexts.Count) context(s): $resourceKinds..."
 
@@ -483,6 +646,21 @@ foreach ($context in $normalizedKubeContexts) {
 
     Write-Host "Reading Kubernetes resources from context '$context'..."
 
+    Write-Host "Listing namespaces in context '$context'..."
+    $namespaceResources = Invoke-JsonCommand `
+        -Command { kubectl @kubectlArguments get namespaces --output json } `
+        -ErrorMessage "Failed to list namespaces from context '$context'."
+
+    $namespacesInContext = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($namespaceResource in @($namespaceResources.items)) {
+        if (-not [string]::IsNullOrWhiteSpace($namespaceResource.metadata.name)) {
+            [void] $namespacesInContext.Add($namespaceResource.metadata.name)
+        }
+    }
+
+    $namespacesByContext[$context] = $namespacesInContext
+    Write-Host "Found $($namespacesInContext.Count) namespace(s) in context '$context'."
+
     $tagsBeforeContext = $usedTags.Count
     $digestsBeforeContext = $usedDigests.Count
     $resourcesScannedInContext = 0
@@ -490,7 +668,7 @@ foreach ($context in $normalizedKubeContexts) {
 
     if ($kubernetesNamespacesToScan.Count -gt 0) {
         foreach ($namespace in $kubernetesNamespacesToScan) {
-            if (-not (Test-KubernetesNamespaceExists -Namespace $namespace -KubectlArguments $kubectlArguments)) {
+            if (-not $namespacesInContext.Contains($namespace)) {
                 Write-Warning "Namespace '$namespace' was not found in context '$context'. Skipping this namespace in this context."
                 continue
             }
@@ -545,22 +723,54 @@ $repositories = Invoke-JsonCommand `
     -Command { az acr repository list --name $RegistryName --output json } `
     -ErrorMessage "Failed to list repositories in registry '$RegistryName'."
 
-$normalizedExcludeRepository = Get-NormalizedStringList -Values $ExcludeRepository
+$repositories = @($repositories | Sort-Object)
+$normalizedExcludeRepository = @(Get-NormalizedStringList -Values $ExcludeRepository)
 
 if ($normalizedIncludeRepositoryPrefix.Count -gt 0) {
     Write-Host "Only repositories matching these prefixes are eligible for deletion: $($normalizedIncludeRepositoryPrefix -join ', ')"
 }
 else {
-    Write-Host "No repository include prefixes configured. All repositories are eligible before exclusions."
+    Write-Host "No repository include prefixes configured. All repositories are eligible before exclusions and will be processed alphabetically."
 }
 
 $repositoriesMatchingPrefix = @($repositories | Where-Object { Test-RepositoryPrefix -Repository $_ -IncludeRepositoryPrefix $normalizedIncludeRepositoryPrefix })
-$repositoriesToProcess = @($repositoriesMatchingPrefix | Where-Object { $normalizedExcludeRepository -notcontains $_ })
-$prefixSkippedRepositoryCount = @($repositories).Count - $repositoriesMatchingPrefix.Count
-$excludedRepositoryCount = @($repositoriesMatchingPrefix | Where-Object { $normalizedExcludeRepository -contains $_ }).Count
-$excludedRepositoriesInScope = @($repositoriesMatchingPrefix | Where-Object { $normalizedExcludeRepository -contains $_ })
+$repositoriesWithNamespace = [System.Collections.Generic.List[string]]::new()
+$repositoriesSkippedWithoutNamespace = [System.Collections.Generic.List[string]]::new()
+$repositoryNamespaceInfoByRepository = @{}
 
-Write-Host "Found $(@($repositories).Count) repositories. Prefix filter skipped $prefixSkippedRepositoryCount. Excluding $excludedRepositoryCount. Processing $($repositoriesToProcess.Count)."
+foreach ($repository in $repositoriesMatchingPrefix) {
+    $repositoryNamespaceInfo = Get-RepositoryNamespaceInfo -Repository $repository -RepositoryNamespaceMapping $repositoryNamespaceMapping
+    $contextsToCheck = @($normalizedKubeContexts)
+
+    if ($repositoryNamespaceInfo.KubeContext.Count -gt 0) {
+        $contextsToCheck = @($repositoryNamespaceInfo.KubeContext | Where-Object { $normalizedKubeContexts -contains $_ })
+    }
+
+    $availableNamespaceContexts = @(Get-AvailableNamespaceContexts -Namespace $repositoryNamespaceInfo.Namespace -NamespacesByContext $namespacesByContext -KubeContext $contextsToCheck)
+
+    if ($availableNamespaceContexts.Count -gt 0) {
+        [void] $repositoriesWithNamespace.Add($repository)
+        $repositoryNamespaceInfoByRepository[$repository] = [pscustomobject]@{
+            Namespace = $repositoryNamespaceInfo.Namespace
+            Contexts  = $availableNamespaceContexts
+            IsMapped  = $repositoryNamespaceInfo.IsMapped
+        }
+    }
+    else {
+        [void] $repositoriesSkippedWithoutNamespace.Add($repository)
+    }
+}
+
+$repositoriesToProcess = @($repositoriesWithNamespace | Where-Object { $normalizedExcludeRepository -notcontains $_ } | Sort-Object)
+$prefixSkippedRepositoryCount = @($repositories).Count - $repositoriesMatchingPrefix.Count
+$excludedRepositoryCount = @($repositoriesWithNamespace | Where-Object { $normalizedExcludeRepository -contains $_ }).Count
+$excludedRepositoriesInScope = @($repositoriesWithNamespace | Where-Object { $normalizedExcludeRepository -contains $_ })
+
+Write-Host "Found $(@($repositories).Count) repositories. Prefix filter skipped $prefixSkippedRepositoryCount. Namespace guard skipped $($repositoriesSkippedWithoutNamespace.Count). Excluding $excludedRepositoryCount. Processing $($repositoriesToProcess.Count)."
+
+if ($repositoriesSkippedWithoutNamespace.Count -gt 0) {
+    Write-Host "Skipping repositories with no matching Kubernetes namespace or mapping in the configured context(s): $($repositoriesSkippedWithoutNamespace -join ', ')"
+}
 
 if ($excludedRepositoriesInScope.Count -gt 0) {
     Write-Host "Excluded repositories in this cleanup scope: $($excludedRepositoriesInScope -join ', ')"
@@ -602,15 +812,23 @@ else {
 }
 
 if ($usedTags.Count -gt $usedTagsForCleanup.Count) {
-    Write-Host "Ignoring $($usedTags.Count - $usedTagsForCleanup.Count) tag reference(s) outside the cleanup repository scope."
+    Write-Host "$($usedTags.Count - $usedTagsForCleanup.Count) tag reference(s) were found outside the cleanup repository scope and do not affect this run."
 }
 
 $totalDeleteCandidates = 0
+$approvedImagesToDelete = [System.Collections.Generic.List[string]]::new()
 $repositoryIndex = 0
 
 foreach ($repository in $repositoriesToProcess) {
     $repositoryIndex++
     Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Processing repository: $repository"
+
+    if ($repositoryNamespaceInfoByRepository.ContainsKey($repository)) {
+        $namespaceInfo = $repositoryNamespaceInfoByRepository[$repository]
+        $mappingLabel = if ($namespaceInfo.IsMapped) { "mapped namespace" } else { "namespace" }
+        Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Repository is eligible through $mappingLabel '$($namespaceInfo.Namespace)' in context(s): $($namespaceInfo.Contexts -join ', ')."
+    }
+
     Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Fetching manifest metadata for $repository..."
 
     $manifests = Invoke-JsonCommand `
@@ -621,6 +839,7 @@ foreach ($repository in $repositoriesToProcess) {
     $protectedByLatestCount = 0
     $protectedByDigestCount = 0
     $protectedByTagCount = 0
+    $usedTagsProtectedByLatest = [System.Collections.Generic.List[string]]::new()
     $manifestCount = @($manifests).Count
     $tagPrefix = "$($repository):"
     $digestPrefix = "$repository@"
@@ -637,8 +856,17 @@ foreach ($repository in $repositoriesToProcess) {
             continue
         }
 
+        $manifestTags = @($manifest.tags | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $usedTagsOnManifest = @()
+
+        foreach ($tag in $manifestTags) {
+            if ($usedTagsForCleanup.Contains("$($repository):$tag")) {
+                $usedTagsOnManifest += $tag
+            }
+        }
+
         $hasLatestTag = $false
-        foreach ($tag in @($manifest.tags)) {
+        foreach ($tag in $manifestTags) {
             if (-not [string]::IsNullOrWhiteSpace($tag) -and $tag.Equals("latest", [System.StringComparison]::OrdinalIgnoreCase)) {
                 $hasLatestTag = $true
                 break
@@ -647,6 +875,15 @@ foreach ($repository in $repositoriesToProcess) {
 
         if ($hasLatestTag) {
             $protectedByLatestCount++
+
+            if ($usedTagsOnManifest.Count -gt 0) {
+                $protectedByTagCount++
+
+                foreach ($usedTagOnManifest in $usedTagsOnManifest) {
+                    [void] $usedTagsProtectedByLatest.Add($usedTagOnManifest)
+                }
+            }
+
             continue
         }
 
@@ -657,12 +894,9 @@ foreach ($repository in $repositoriesToProcess) {
         }
 
         $hasUsedTag = $false
-        foreach ($tag in @($manifest.tags)) {
-            if (-not [string]::IsNullOrWhiteSpace($tag) -and $usedTagsForCleanup.Contains("$($repository):$tag")) {
-                $hasUsedTag = $true
-                $protectedByTagCount++
-                break
-            }
+        if ($usedTagsOnManifest.Count -gt 0) {
+            $hasUsedTag = $true
+            $protectedByTagCount++
         }
 
         if (-not $hasUsedTag) {
@@ -675,9 +909,7 @@ foreach ($repository in $repositoriesToProcess) {
 
         if ($EnableDelete) {
             if ($PSCmdlet.ShouldProcess("$RegistryName/$imageName", "Delete ACR manifest")) {
-                [void] (Invoke-NativeCommand `
-                    -Command { az acr repository delete --name $RegistryName --image $imageName --yes --output none } `
-                    -ErrorMessage "Failed to delete image '$imageName'.")
+                [void] $approvedImagesToDelete.Add($imageName)
             }
         }
         else {
@@ -697,17 +929,22 @@ foreach ($repository in $repositoriesToProcess) {
         }
     }
 
+    if ($usedTagsProtectedByLatest.Count -gt 0) {
+        Write-Warning "Kubernetes tag reference(s) in '$repository' matched manifest(s) that are also protected by latest tag: $(@($usedTagsProtectedByLatest | Sort-Object -Unique) -join ', ')"
+    }
+
     if ($EnableDelete) {
-        Write-Host "Deleted $($imagesToDelete.Count) unused image manifest(s) from repository $repository"
+        Write-Host "Queued $($imagesToDelete.Count) unused image manifest(s) from repository $repository for deletion" -ForegroundColor Green
     }
     else {
-        Write-Host "Would delete $($imagesToDelete.Count) unused image manifest(s) from repository $repository"
+        Write-Host "Would delete $($imagesToDelete.Count) unused image manifest(s) from repository $repository" -ForegroundColor Green
     }
 }
 
 if ($EnableDelete) {
-    Write-Host "Deleted $totalDeleteCandidates unused image manifest(s) from registry '$RegistryName'."
+    $deletedCount = Invoke-ParallelAcrRepositoryDelete -RegistryName $RegistryName -ImageNames $approvedImagesToDelete.ToArray() -ThrottleLimit $DeleteThrottleLimit
+    Write-Host "Deleted $deletedCount of $totalDeleteCandidates unused image manifest(s) from registry '$RegistryName'." -ForegroundColor Green
 }
 else {
-    Write-Host "Dry run complete. Would delete $totalDeleteCandidates unused image manifest(s) from registry '$RegistryName'. Pass -EnableDelete to delete them."
+    Write-Host "Dry run complete. Would delete $totalDeleteCandidates unused image manifest(s) from registry '$RegistryName'. Pass -EnableDelete to delete them." -ForegroundColor Green
 }
