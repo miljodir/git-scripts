@@ -9,28 +9,24 @@ param (
   [string] [Parameter(Mandatory=$false)] $ruleFilter = "cs/*"
 )
 
-if ($org -eq "miljodir") {
-  $env:jwt = (node ../../local-repo-sync/authapp/app.js $org | ConvertFrom-Json | Select-Object token -ExpandProperty token)
-}
-
 #$criticalAlerts =  gh api --method GET "/orgs/$org/code-scanning/alerts?state=open&tool_name=$tool&severity=critical" --paginate | ConvertFrom-Json 
 $alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open&tool_name=$tool" --paginate | ConvertFrom-Json
-$filteredAlerts = $alerts | Where-Object { $_.rule.id -like $ruleFilter -and ($_.most_recent_instance.classifications -ne "generated" -or "" -eq $_.most_recent_instance.classifications) }
-$repofilter = "myrepo"
-#$filteredAlerts = $filteredAlerts | Where-Object { $_.repository.name -like $repofilter }
+#$filteredAlerts = $alerts | Where-Object { $_.rule.id -like $ruleFilter }
+$repofilter = "wl-testteam1"
+$filteredAlerts = $alerts | Where-Object { $_.repository.name -like $repofilter }
 
 # Group alerts by repository
 $alertsByRepo = $filteredAlerts | Group-Object -Property { $_.repository.name }
 
 
-foreach ($alert in $filteredAlerts) {
-  $alertNumber = $alert.number
-  $repo = $alert.repository.name
-  Write-Host "Attempting to create autofix for alert $alertNumber in repo $repo"
-  gh api `
-    --method POST `
-    /repos/$org/$repo/code-scanning/alerts/$alertNumber/autofix
-}
+# foreach ($alert in $filteredAlerts) {
+#   $alertNumber = $alert.number
+#   $repo = $alert.repository.name
+#   Write-Host "Attempting to create autofix for alert $alertNumber in repo $repo"
+#   gh api `
+#     --method POST `
+#     /repos/$org/$repo/code-scanning/alerts/$alertNumber/autofix
+# }
 
 
 function CreateBranchFromDefault {
@@ -55,24 +51,24 @@ function CreateBranchFromDefault {
 
 
 
-# foreach ($folder in $filteredAlerts.repository.name | Sort-Object | get-unique) {
-#   CreateBranchFromDefault -org $org -repo $folder -newBranch "codeql-autofixes"
-# }
+foreach ($folder in $filteredAlerts.repository.name | Sort-Object | get-unique) {
+  CreateBranchFromDefault -org $org -repo $folder -newBranch "codeql-autofixes"
+}
 
 # after fix is created, commit the fix to the branch
-#Start-Sleep 30
+Start-Sleep 30
 $alerts = @()
 
-# foreach ($alert in $filteredAlerts) {
-#   $alertNumber = $alert.number
-#   $repo = $alert.repository.name
-#   $alerts += $alert.html_url
-#   Write-Host "Attempting to create autofix for alert $alertNumber in repo $repo"
-#   gh api `
-#     --method POST `
-#     /repos/$org/$repo/code-scanning/alerts/$alertNumber/autofix/commits `
-#     -f "target_ref=refs/heads/codeql-autofixes" -f "message=AI-generated autofix for alert $alertNumber"
-# }
+foreach ($alert in $filteredAlerts) {
+  $alertNumber = $alert.number
+  $repo = $alert.repository.name
+  $alerts += $alert.html_url
+  Write-Host "Attempting to create autofix for alert $alertNumber in repo $repo"
+  gh api `
+    --method POST `
+    /repos/$org/$repo/code-scanning/alerts/$alertNumber/autofix/commits `
+    -f "target_ref=refs/heads/codeql-autofixes" -f "message=AI-generated autofix for alert $alertNumber"
+}
 
 # finally - create a pull request with all the generated autofixes
 

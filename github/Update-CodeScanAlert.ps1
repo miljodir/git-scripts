@@ -71,11 +71,16 @@ $devTestIds = @(
     "CKV_AZURE_110"
 )
 
-$alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open" --paginate | ConvertFrom-Json
+#$alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open" --paginate | ConvertFrom-Json
+
+$alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?tool_name=$tool&state=open" --paginate | ConvertFrom-Json
 
     foreach ($alert in $alerts)
     {
-
+        #if ($alert.rule.id -in $ids)
+        # {
+        #     gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=won't fix" -f "dismissed_comment=Terrascan was deprecated in November 2025. Please rely on scan results from Checkov and Kubescape instead."
+        # }
         if ( $alert.most_recent_instance.location.path -like "*-values.yaml" -or $alert.most_recent_instance.location.path -like "*/kustomization.yaml" )
         {
             gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=The alert detected a potential misconfig in the -values.yaml file, which only contains overrides and cannot be evaulated by itself"
@@ -84,13 +89,31 @@ $alerts = gh api --method GET "/orgs/$org/code-scanning/alerts?state=open" --pag
         {
             gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=won't fix" -f "dismissed_comment=This alert is acceptable in dev environments"
         }
-        elseif ( $alert.most_recent_instance.location.path -like "*dev/*" -or $alert.most_recent_instance.location.path -like "*test/*"   -and $alert.rule.id -in $devTestIds)
-        {
-            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert is acceptable in dev environments"
+        else {
+            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=won't fix" -f "dismissed_comment=Terrascan was deprecated in November 2025. Please rely on scan results from Checkov and Kubescape instead."
         }
-        elseif ($alert.rule.id -in $ids)
-        {
-            gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert is deemed not relevant by the MAP team, is a false positive, or is covered by other measures"
-        }
+
     }
+
+
+    # foreach ($alert in $alerts)
+    # {
+
+    #     if ( $alert.most_recent_instance.location.path -like "*-values.yaml" -or $alert.most_recent_instance.location.path -like "*/kustomization.yaml" )
+    #     {
+    #         gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=The alert detected a potential misconfig in the -values.yaml file, which only contains overrides and cannot be evaulated by itself"
+    #     }
+    #     elseif ( $alert.most_recent_instance.location.path -like "*dev/*" -and $alert.rule.id -in $devOnlyIds)
+    #     {
+    #         gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=won't fix" -f "dismissed_comment=This alert is acceptable in dev environments"
+    #     }
+    #     elseif ( $alert.most_recent_instance.location.path -like "*dev/*" -or $alert.most_recent_instance.location.path -like "*test/*"   -and $alert.rule.id -in $devTestIds)
+    #     {
+    #         gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert is acceptable in dev environments"
+    #     }
+    #     elseif ($alert.rule.id -in $ids)
+    #     {
+    #         gh api --method PATCH "/repos/$org/$($alert.repository.name)/code-scanning/alerts/$($alert.number)" -f "state=dismissed" -f "dismissed_reason=false positive" -f "dismissed_comment=This alert is deemed not relevant by the MAP team, is a false positive, or is covered by other measures"
+    #     }
+    # }
 
