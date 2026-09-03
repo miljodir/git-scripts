@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-Safely duplicates simple NGINX Ingress resources for HAProxy.
+Duplicates NGINX Ingress resources for HAProxy and translates known annotations.
 
 .DESCRIPTION
 The default mode is read-only. The script appends HAProxy copies to the same
-manifest, clones name-specific Kustomize patches, and removes DNS ownership
-annotations from the HAProxy copy. It refuses to apply a repository-wide plan
-when NGINX-specific annotations or patches require semantic translation.
+manifest, preserves DNS ownership annotations, clones name-specific Kustomize
+patches, and translates supported NGINX annotations. Unsupported annotations
+are retained as comments with migration warnings for manual review.
 Specify either RepoPath for one repository or WorkspacePath to process every
 folder in a VS Code workspace. Relative workspace paths are resolved from the
 directory containing the workspace file.
@@ -44,6 +44,26 @@ $ErrorActionPreference = 'Stop'
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $nameSuffix = '-haproxy'
 $haproxyClass = 'haproxy-internal'
+$directAnnotationMappings = @{
+    'nginx.ingress.kubernetes.io/auth-realm'              = 'haproxy.org/auth-realm'
+    'nginx.ingress.kubernetes.io/auth-secret'             = 'haproxy.org/auth-secret'
+    'nginx.ingress.kubernetes.io/auth-type'               = 'haproxy.org/auth-type'
+    'nginx.ingress.kubernetes.io/cors-allow-credentials'  = 'haproxy.org/cors-allow-credentials'
+    'nginx.ingress.kubernetes.io/cors-allow-headers'      = 'haproxy.org/cors-allow-headers'
+    'nginx.ingress.kubernetes.io/cors-allow-methods'      = 'haproxy.org/cors-allow-methods'
+    'nginx.ingress.kubernetes.io/cors-allow-origin'       = 'haproxy.org/cors-allow-origin'
+    'nginx.ingress.kubernetes.io/cors-max-age'            = 'haproxy.org/cors-max-age'
+    'nginx.ingress.kubernetes.io/denylist-source-range'   = 'haproxy.org/deny-list'
+    'nginx.ingress.kubernetes.io/enable-cors'             = 'haproxy.org/cors-enable'
+    'nginx.ingress.kubernetes.io/force-ssl-redirect'      = 'haproxy.org/ssl-redirect'
+    'nginx.ingress.kubernetes.io/permanent-redirect-code' = 'haproxy.org/request-redirect-code'
+    'nginx.ingress.kubernetes.io/ssl-passthrough'         = 'haproxy.org/ssl-passthrough'
+    'nginx.ingress.kubernetes.io/ssl-redirect'            = 'haproxy.org/ssl-redirect'
+    'nginx.ingress.kubernetes.io/temporal-redirect'       = 'haproxy.org/request-redirect'
+    'nginx.ingress.kubernetes.io/temporal-redirect-code'  = 'haproxy.org/request-redirect-code'
+    'nginx.ingress.kubernetes.io/upstream-vhost'          = 'haproxy.org/set-host'
+    'nginx.ingress.kubernetes.io/whitelist-source-range'  = 'haproxy.org/allow-list'
+}
 
 function Get-NewLine {
     param([string] $Text)
@@ -95,26 +115,174 @@ function Get-IngressMetadata {
     }
 }
 
-function Remove-DnsAnnotations {
+function Get-AnnotationValue {
     param(
-        [string] $Document,
-        [string] $NewLine
+        [Parameter(Mandatory)][string] $Suffix
     )
 
-    $result = [regex]::Replace(
+    $match = [regex]::Match($Suffix, '^\s*(?<value>"[^"]*"|''[^'']*''|[^#]*?)\s*(?:#.*)?$')
+    return $match.Groups['value'].Value.Trim()
+}
+
+function Convert-TimeoutValue {
+    param([Parameter(Mandatory)][string] $Value)
+
+    $unquoted = $Value.Trim().Trim('"', "'")
+    if ($unquoted -match '^\d+(?:\.\d+)?$') {
+        $unquoted += 's'
+    }
+
+    return '"' + $unquoted + '"'
+}
+
+function Get-HaproxyPathRewrite {
+    param(
+        [Parameter(Mandatory)][string] $Document,
+        [Parameter(Mandatory)][string] $Target,
+        [Parameter(Mandatory)][string] $Indent,
+        [Parameter(Mandatory)][string] $NewLine
+    )
+
+    $replacement = $Target.Trim().Trim('"', "'")
+    $replacement = [regex]::Replace($replacement, '\$(\d+)', '\${1}')
+    $paths = @(
+        [regex]::Matches($Document, '(?m)^\s+(?:-\s+)?path:\s*(?<path>[^\r\n]*?\S)(?:[ ]+#.*)?(?=\r?$)') |
+            ForEach-Object { $_.Groups['path'].Value.Trim().Trim('"', "'") } |
+            Select-Object -Unique
+    )
+    if ($paths.Count -eq 0) {
+        return $null
+    }
+
+    if ($paths.Count -eq 1) {
+        $rule = ($paths[0] + ' ' + $replacement).Replace("'", "''")
+        return "$Indent" + "haproxy.org/path-rewrite: '$rule'"
+    }
+
+    $rules = $paths | ForEach-Object { "$Indent  $_ $replacement" }
+    return "$Indent" + 'haproxy.org/path-rewrite: |' + $NewLine + ($rules -join $NewLine)
+}
+
+function Convert-NginxAnnotations {
+    param(
+        [Parameter(Mandatory)][string] $Document,
+        [Parameter(Mandatory)][string] $NewLine,
+        [System.Collections.Generic.List[string]] $Warnings,
+        [Parameter(Mandatory)][string] $Source
+    )
+
+    $emittedAnnotations = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    $annotationPattern = '(?m)^(?<indent>[ ]{4})(?<name>nginx(?:\.ingress\.kubernetes\.io|\.org)/[^:]+):(?<suffix>[^\r\n]*)(?=\r?$)'
+    $blockAnnotationPattern = '(?ms)^(?<indent>[ ]{4})(?<name>nginx(?:\.ingress\.kubernetes\.io|\.org)/[^:]+):(?<suffix>[ ]*[|>][+-]?\d*[^\r\n]*)(?<body>(?:\r?\n(?:[ ]{6,}[^\r\n]*|[ ]*(?=\r?$)))*)'
+
+    $convertedDocument = [regex]::Replace(
         $Document,
-        '(?m)^\s{4}miljodir/(?:public|private)-dns:\s*[^\r\n]*(?:\r?\n|$)',
-        ''
+        $blockAnnotationPattern,
+        {
+            param($match)
+
+            $indent = $match.Groups['indent'].Value
+            $name = $match.Groups['name'].Value
+            $Warnings.Add("${Source}: '$name' uses a block value and was commented out because no automatic HAProxy conversion is supported.")
+            $lines = [regex]::Split($match.Value, '\r?\n')
+            $commentedLines = [System.Collections.Generic.List[string]]::new()
+            $commentedLines.Add(
+                "$indent# $($lines[0].TrimStart()) # WARNING: HAProxy migration was not possible; review manually."
+            )
+            foreach ($line in $lines | Select-Object -Skip 1) {
+                $commentedLines.Add("$indent# $($line.TrimStart())")
+            }
+            return $commentedLines -join $NewLine
+        }
     )
 
-    # Avoid leaving metadata.annotations as null when DNS was its only entry.
-    $result = [regex]::Replace(
-        $result,
-        '(?m)^\s{2}annotations:\s*\r?\n(?=(?:\s*\r?\n)*^\S)',
-        ''
-    )
+    return [regex]::Replace(
+        $convertedDocument,
+        $annotationPattern,
+        {
+            param($match)
 
-    return $result
+            $indent = $match.Groups['indent'].Value
+            $name = $match.Groups['name'].Value
+            $suffix = $match.Groups['suffix'].Value
+            $value = Get-AnnotationValue -Suffix $suffix
+            $targetName = $null
+            $targetLine = $null
+            $failureReason = $null
+
+            if ($name -eq 'nginx.ingress.kubernetes.io/permanent-redirect') {
+                $targetName = 'haproxy.org/request-redirect'
+                $targetLine = "$indent$targetName`:$suffix"
+                if ($Document -notmatch '(?m)^\s{4}nginx\.ingress\.kubernetes\.io/permanent-redirect-code:') {
+                    $targetLine += "$NewLine$indent" + 'haproxy.org/request-redirect-code: "301"'
+                    [void]$emittedAnnotations.Add('haproxy.org/request-redirect-code')
+                }
+            }
+            elseif ($directAnnotationMappings.ContainsKey($name)) {
+                $targetName = $directAnnotationMappings[$name]
+                $targetLine = "$indent$targetName`:$suffix"
+            }
+            elseif ($name -eq 'nginx.ingress.kubernetes.io/rewrite-target') {
+                $targetName = 'haproxy.org/path-rewrite'
+                $targetLine = Get-HaproxyPathRewrite `
+                    -Document $Document `
+                    -Target $value `
+                    -Indent $indent `
+                    -NewLine $NewLine
+                if ($null -eq $targetLine) {
+                    $failureReason = 'no Ingress paths were found to build a path-rewrite rule'
+                }
+            }
+            elseif ($name -in @(
+                    'nginx.ingress.kubernetes.io/proxy-connect-timeout',
+                    'nginx.ingress.kubernetes.io/proxy-read-timeout',
+                    'nginx.ingress.kubernetes.io/proxy-send-timeout'
+                )) {
+                $targetName = if ($name -eq 'nginx.ingress.kubernetes.io/proxy-connect-timeout') {
+                    'haproxy.org/timeout-check'
+                }
+                else {
+                    'haproxy.org/timeout-server'
+                }
+                $targetLine = "$indent$targetName`: $(Convert-TimeoutValue -Value $value)"
+            }
+            elseif ($name -eq 'nginx.ingress.kubernetes.io/backend-protocol') {
+                $protocol = $value.Trim().Trim('"', "'").ToUpperInvariant()
+                $protocolAnnotations = switch ($protocol) {
+                    'HTTPS' { @("$indent" + 'haproxy.org/server-ssl: "true"') }
+                    'GRPC' { @("$indent" + 'haproxy.org/server-proto: "h2"') }
+                    'GRPCS' {
+                        @(
+                            "$indent" + 'haproxy.org/server-proto: "h2"'
+                            "$indent" + 'haproxy.org/server-ssl: "true"'
+                        )
+                    }
+                    default { @() }
+                }
+                if ($protocolAnnotations.Count -gt 0) {
+                    return $protocolAnnotations -join $NewLine
+                }
+            }
+
+            if ($null -ne $targetLine -and $emittedAnnotations.Add($targetName)) {
+                return $targetLine
+            }
+
+            $reason = if ($null -ne $failureReason) {
+                $failureReason
+            }
+            elseif ($null -ne $targetName) {
+                "mapping to '$targetName' conflicts with another translated annotation"
+            }
+            else {
+                'no supported HAProxy Community annotation equivalent was found'
+            }
+            $Warnings.Add("${Source}: '$name' was commented out because $reason.")
+            return "$indent# $name`:$suffix # WARNING: HAProxy migration was not possible; review manually."
+        }
+    )
 }
 
 function New-HaproxyIngressDocument {
@@ -155,24 +323,7 @@ function New-HaproxyIngressDocument {
         )
     }
 
-    return Remove-DnsAnnotations -Document $clone -NewLine $NewLine
-}
-
-function Remove-DnsPatchOperations {
-    param([string] $PatchItem)
-
-    $operationPattern = '(?ms)^\s{6}- op:\s*.*?(?=^\s{6}- op:|^\s{4}target:|\z)'
-    return [regex]::Replace(
-        $PatchItem,
-        $operationPattern,
-        {
-            param($match)
-            if ($match.Value -match '/metadata/annotations/miljodir~1(?:public|private)-dns') {
-                return ''
-            }
-            return $match.Value
-        }
-    )
+    return $clone
 }
 
 function Get-KustomizationChanges {
@@ -188,48 +339,72 @@ function Get-KustomizationChanges {
     $blockers = [System.Collections.Generic.List[string]]::new()
 
     for ($index = 0; $index -lt $lines.Count; $index++) {
-        if ($lines[$index] -notmatch '^\s{2}-\s') {
+        $itemStart = [regex]::Match($lines[$index], '^(?<indent> *)-\s')
+        if (-not $itemStart.Success) {
             continue
         }
 
+        $itemIndent = $itemStart.Groups['indent'].Value.Length
         $end = $index + 1
-        while ($end -lt $lines.Count -and $lines[$end] -notmatch '^\s{2}-\s' -and $lines[$end] -notmatch '^\S') {
+        while ($end -lt $lines.Count) {
+            if ([string]::IsNullOrWhiteSpace($lines[$end])) {
+                $end++
+                continue
+            }
+
+            $lineIndent = [regex]::Match($lines[$end], '^ *').Value.Length
+            if ($lineIndent -lt $itemIndent -or
+                ($lineIndent -eq $itemIndent -and $lines[$end] -notmatch '^\s*#')) {
+                break
+            }
             $end++
         }
 
         $itemLines = $lines[$index..($end - 1)]
         $item = $itemLines -join $newLine
-        if ($item -notmatch '(?m)^\s{6}kind:\s*Ingress\s*$') {
+        $target = [regex]::Match($item, '(?ms)^\s*(?:-\s*)?target:\s*(?:#.*)?\r?\n(?<body>.*)$')
+        if (-not $target.Success -or $target.Groups['body'].Value -notmatch '(?m)^\s+kind:\s*Ingress\s*$') {
             $index = $end - 1
             continue
         }
 
-        if ($item -match '(?m)^\s{6}name:\s*(?<name>[^#\r\n]+?)\s*(?:#.*)?$') {
+        if ($target.Groups['body'].Value -match '(?m)^\s+name:\s*(?<name>[^#\r\n]+?)\s*(?:#.*)?$') {
             $originalName = $Matches['name'].Trim().Trim('"', "'")
             if (-not $IngressNames.ContainsKey($originalName)) {
                 $index = $end - 1
                 continue
             }
 
-            if ($item -match 'nginx(?:\.ingress)?\.' -or $item -match '/spec/ingressClassName') {
+            $translatedItem = $item
+            foreach ($mapping in $directAnnotationMappings.GetEnumerator()) {
+                $encodedSource = $mapping.Key.Replace('/', '~1')
+                $encodedTarget = $mapping.Value.Replace('/', '~1')
+                $translatedItem = $translatedItem.Replace($encodedSource, $encodedTarget)
+            }
+
+            if ($translatedItem -match 'nginx(?:\.ingress)?\.' -or $translatedItem -match '/spec/ingressClassName') {
                 $blockers.Add("$Path targets '$originalName' with NGINX-specific or ingress-class changes.")
                 $index = $end - 1
                 continue
             }
 
             $haproxyName = "$originalName$nameSuffix"
-            if ($raw -match "(?m)^\s{6}name:\s*$([regex]::Escape($haproxyName))\s*(?:#.*)?$") {
+            if ($raw -match "(?m)^\s+name:\s*$([regex]::Escape($haproxyName))\s*(?:#.*)?$") {
                 $index = $end - 1
                 continue
             }
 
-            $clone = [regex]::Replace(
-                $item,
-                '(?m)^(\s{6}name:\s*)[^#\r\n]+?(\s*(?:#.*)?)$',
+            $translatedTarget = [regex]::Match(
+                $translatedItem,
+                '(?ms)^\s*(?:-\s*)?target:\s*(?:#.*)?\r?\n(?<body>.*)$'
+            )
+            $updatedTargetBody = [regex]::Replace(
+                $translatedTarget.Groups['body'].Value,
+                '(?m)^(\s+name:\s*)[^#\r\n]+?(\s*(?:#.*)?)$',
                 "`${1}$haproxyName`${2}",
                 1
             )
-            $clone = Remove-DnsPatchOperations -PatchItem $clone
+            $clone = $translatedItem.Substring(0, $translatedTarget.Groups['body'].Index) + $updatedTargetBody
             $insertions.Add([pscustomobject]@{
                 AfterLine = $end - 1
                 Text      = $clone
@@ -307,14 +482,6 @@ function Invoke-Repository {
                 continue
             }
 
-            if ($hasNginxAnnotations) {
-                $blockers.Add(
-                    "$($file.FullName): ingress '$($metadata.Name)' uses unsupported NGINX annotations: " +
-                    ($metadata.NginxAnnotations -join ', ')
-                )
-                continue
-            }
-
             if ($isImplicitNginx) {
                 $warnings.Add("$($file.FullName): treating implicit ingress '$($metadata.Name)' as NGINX.")
             }
@@ -328,6 +495,11 @@ function Invoke-Repository {
                 -Document $document `
                 -OriginalName $metadata.Name `
                 -NewLine $newLine
+            $clone = Convert-NginxAnnotations `
+                -Document $clone `
+                -NewLine $newLine `
+                -Warnings $warnings `
+                -Source "$($file.FullName): ingress '$($metadata.Name)'"
             $clones.Add($clone.TrimEnd("`r", "`n"))
             $ingressNames[$metadata.Name] = $true
         }
