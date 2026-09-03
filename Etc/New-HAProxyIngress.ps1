@@ -7,21 +7,31 @@ The default mode is read-only. The script appends HAProxy copies to the same
 manifest, clones name-specific Kustomize patches, and removes DNS ownership
 annotations from the HAProxy copy. It refuses to apply a repository-wide plan
 when NGINX-specific annotations or patches require semantic translation.
+Specify either RepoPath for one repository or WorkspacePath to process every
+folder in a VS Code workspace. Relative workspace paths are resolved from the
+directory containing the workspace file.
 
 .EXAMPLE
-.\Copy-NginxIngressToHAProxy.ps1 -RepoPath C:\appl\repos\wl-skogve
+.\New-HAProxyIngress.ps1 -RepoPath C:\appl\repos\wl-skogve
 
 .EXAMPLE
-.\Copy-NginxIngressToHAProxy.ps1 -RepoPath C:\appl\repos\wl-skogve -Apply
+.\New-HAProxyIngress.ps1 -RepoPath C:\appl\repos\wl-skogve -Apply
 
 .EXAMPLE
-.\Copy-NginxIngressToHAProxy.ps1 -RepoPath C:\appl\repos\wl-example -IncludeImplicitNginx
+.\New-HAProxyIngress.ps1 -WorkspacePath C:\appl\repos\wl-repos.code-workspace
+
+.EXAMPLE
+.\New-HAProxyIngress.ps1 -WorkspacePath C:\appl\repos\wl-repos.code-workspace -Apply
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Repository')]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Repository')]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Container })]
     [string] $RepoPath,
+
+    [Parameter(Mandatory, ParameterSetName = 'Workspace')]
+    [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
+    [string] $WorkspacePath,
 
     [switch] $Apply,
 
@@ -31,7 +41,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repo = (Resolve-Path -LiteralPath $RepoPath).Path
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $nameSuffix = '-haproxy'
 $haproxyClass = 'haproxy-internal'
@@ -261,127 +270,204 @@ function Get-KustomizationChanges {
     }
 }
 
-$sourcePlans = [System.Collections.Generic.List[object]]::new()
-$blockers = [System.Collections.Generic.List[string]]::new()
-$warnings = [System.Collections.Generic.List[string]]::new()
-$ingressNames = @{}
+function Invoke-Repository {
+    param([Parameter(Mandatory)][string] $Path)
 
-$yamlFiles = Get-ChildItem -LiteralPath $repo -Recurse -File -Include '*.yaml', '*.yml' |
-    Where-Object {
-        $_.FullName -notmatch '[\\/]\.git[\\/]' -and
-        $_.Name -notmatch '^(?:kustomization|fluxkustomization)\.ya?ml$'
-    }
+    $repo = (Resolve-Path -LiteralPath $Path).Path
+    $sourcePlans = [System.Collections.Generic.List[object]]::new()
+    $blockers = [System.Collections.Generic.List[string]]::new()
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    $ingressNames = @{}
 
-foreach ($file in $yamlFiles) {
-    $raw = [System.IO.File]::ReadAllText($file.FullName)
-    $newLine = Get-NewLine -Text $raw
-    $clones = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($document in Get-YamlDocuments -Text $raw) {
-        $metadata = Get-IngressMetadata -Document $document
-        if ($null -eq $metadata) {
-            continue
+    $yamlFiles = Get-ChildItem -LiteralPath $repo -Recurse -File -Include '*.yaml', '*.yml' |
+        Where-Object {
+            $_.FullName -notmatch '[\\/]\.git[\\/]' -and
+            $_.Name -notmatch '^(?:kustomization|fluxkustomization)\.ya?ml$'
         }
 
-        $isExplicitNginx = $metadata.Class -eq 'nginx'
-        $hasNginxAnnotations = $metadata.NginxAnnotations.Count -gt 0
-        $isImplicitNginx = [string]::IsNullOrWhiteSpace($metadata.Class)
-        if (-not $isExplicitNginx -and -not $hasNginxAnnotations -and -not ($IncludeImplicitNginx -and $isImplicitNginx)) {
-            continue
+    foreach ($file in $yamlFiles) {
+        $raw = [System.IO.File]::ReadAllText($file.FullName)
+        $newLine = Get-NewLine -Text $raw
+        $clones = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($document in Get-YamlDocuments -Text $raw) {
+            $metadata = Get-IngressMetadata -Document $document
+            if ($null -eq $metadata) {
+                continue
+            }
+
+            $isExplicitNginx = $metadata.Class -eq 'nginx'
+            $hasNginxAnnotations = $metadata.NginxAnnotations.Count -gt 0
+            $isImplicitNginx = [string]::IsNullOrWhiteSpace($metadata.Class)
+            if (-not $isExplicitNginx -and -not $hasNginxAnnotations -and -not ($IncludeImplicitNginx -and $isImplicitNginx)) {
+                continue
+            }
+
+            if ($metadata.Name.EndsWith($nameSuffix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+
+            if ($hasNginxAnnotations) {
+                $blockers.Add(
+                    "$($file.FullName): ingress '$($metadata.Name)' uses unsupported NGINX annotations: " +
+                    ($metadata.NginxAnnotations -join ', ')
+                )
+                continue
+            }
+
+            if ($isImplicitNginx) {
+                $warnings.Add("$($file.FullName): treating implicit ingress '$($metadata.Name)' as NGINX.")
+            }
+
+            $haproxyName = "$($metadata.Name)$nameSuffix"
+            if ($raw -match "(?m)^\s{2}name:\s*$([regex]::Escape($haproxyName))\s*(?:#.*)?$") {
+                continue
+            }
+
+            $clone = New-HaproxyIngressDocument `
+                -Document $document `
+                -OriginalName $metadata.Name `
+                -NewLine $newLine
+            $clones.Add($clone.TrimEnd("`r", "`n"))
+            $ingressNames[$metadata.Name] = $true
         }
 
-        if ($metadata.Name.EndsWith($nameSuffix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            continue
-        }
+        if ($clones.Count -gt 0) {
+            $content = $raw.TrimEnd("`r", "`n")
+            foreach ($clone in $clones) {
+                $content += "$newLine---$newLine$clone"
+            }
+            $content += $newLine
 
-        if ($hasNginxAnnotations) {
-            $blockers.Add(
-                "$($file.FullName): ingress '$($metadata.Name)' uses unsupported NGINX annotations: " +
-                ($metadata.NginxAnnotations -join ', ')
-            )
-            continue
-        }
-
-        if ($isImplicitNginx) {
-            $warnings.Add("$($file.FullName): treating implicit ingress '$($metadata.Name)' as NGINX.")
-        }
-
-        $haproxyName = "$($metadata.Name)$nameSuffix"
-        if ($raw -match "(?m)^\s{2}name:\s*$([regex]::Escape($haproxyName))\s*(?:#.*)?$") {
-            continue
-        }
-
-        $clone = New-HaproxyIngressDocument `
-            -Document $document `
-            -OriginalName $metadata.Name `
-            -NewLine $newLine
-        $clones.Add($clone.TrimEnd("`r", "`n"))
-        $ingressNames[$metadata.Name] = $true
-    }
-
-    if ($clones.Count -gt 0) {
-        $content = $raw.TrimEnd("`r", "`n")
-        foreach ($clone in $clones) {
-            $content += "$newLine---$newLine$clone"
-        }
-        $content += $newLine
-
-        $sourcePlans.Add([pscustomobject]@{
-            Path    = $file.FullName
-            Content = $content
-            Count   = $clones.Count
-        })
-    }
-}
-
-$kustomizationPlans = [System.Collections.Generic.List[object]]::new()
-if ($ingressNames.Count -gt 0) {
-    $kustomizationFiles = Get-ChildItem -LiteralPath $repo -Recurse -File -Include 'kustomization.yaml', 'kustomization.yml' |
-        Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' }
-
-    foreach ($file in $kustomizationFiles) {
-        $plan = Get-KustomizationChanges -Path $file.FullName -IngressNames $ingressNames
-        foreach ($blocker in $plan.Blockers) {
-            $blockers.Add($blocker)
-        }
-        if ($plan.Changes.Count -gt 0) {
-            $kustomizationPlans.Add($plan)
+            $sourcePlans.Add([pscustomobject]@{
+                Path    = $file.FullName
+                Content = $content
+                Count   = $clones.Count
+            })
         }
     }
-}
 
-Write-Output "Repository: $repo"
-Write-Output "Mode: $(if ($Apply) { 'apply' } else { 'dry-run' })"
-foreach ($plan in $sourcePlans) {
-    Write-Output "DUPLICATE $($plan.Count) ingress(es): $($plan.Path)"
-}
-foreach ($plan in $kustomizationPlans) {
-    foreach ($change in $plan.Changes) {
-        Write-Output "CLONE PATCH for '$($change.Name)': $($plan.Path)"
+    $kustomizationPlans = [System.Collections.Generic.List[object]]::new()
+    if ($ingressNames.Count -gt 0) {
+        $kustomizationFiles = Get-ChildItem -LiteralPath $repo -Recurse -File -Include 'kustomization.yaml', 'kustomization.yml' |
+            Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' }
+
+        foreach ($file in $kustomizationFiles) {
+            $plan = Get-KustomizationChanges -Path $file.FullName -IngressNames $ingressNames
+            foreach ($blocker in $plan.Blockers) {
+                $blockers.Add($blocker)
+            }
+            if ($plan.Changes.Count -gt 0) {
+                $kustomizationPlans.Add($plan)
+            }
+        }
     }
-}
-foreach ($warning in $warnings) {
-    Write-Warning $warning
-}
-foreach ($blocker in $blockers) {
-    Write-Warning "BLOCKED: $blocker"
-}
 
-if ($Apply -and $blockers.Count -gt 0) {
-    throw "No files changed because $($blockers.Count) unsafe transformation(s) require manual review."
-}
-
-if ($Apply) {
+    Write-Host ''
+    Write-Host "Repository: $repo"
+    Write-Host "Mode: $(if ($Apply) { 'apply' } else { 'dry-run' })"
     foreach ($plan in $sourcePlans) {
-        if ($PSCmdlet.ShouldProcess($plan.Path, 'append HAProxy ingress duplicate')) {
-            [System.IO.File]::WriteAllText($plan.Path, $plan.Content, $utf8NoBom)
-        }
+        Write-Host "DUPLICATE $($plan.Count) ingress(es): $($plan.Path)"
     }
     foreach ($plan in $kustomizationPlans) {
-        if ($PSCmdlet.ShouldProcess($plan.Path, 'clone Ingress patch target for HAProxy')) {
-            [System.IO.File]::WriteAllText($plan.Path, $plan.Content, $utf8NoBom)
+        foreach ($change in $plan.Changes) {
+            Write-Host "CLONE PATCH for '$($change.Name)': $($plan.Path)"
         }
+    }
+    foreach ($warning in $warnings) {
+        Write-Warning $warning
+    }
+    foreach ($blocker in $blockers) {
+        Write-Warning "BLOCKED: $blocker"
+    }
+
+    $applied = $false
+    if ($Apply -and $blockers.Count -eq 0) {
+        foreach ($plan in $sourcePlans) {
+            if ($PSCmdlet.ShouldProcess($plan.Path, 'append HAProxy ingress duplicate')) {
+                [System.IO.File]::WriteAllText($plan.Path, $plan.Content, $utf8NoBom)
+            }
+        }
+        foreach ($plan in $kustomizationPlans) {
+            if ($PSCmdlet.ShouldProcess($plan.Path, 'clone Ingress patch target for HAProxy')) {
+                [System.IO.File]::WriteAllText($plan.Path, $plan.Content, $utf8NoBom)
+            }
+        }
+        $applied = $true
+    }
+    elseif ($Apply -and $blockers.Count -gt 0) {
+        Write-Warning "SKIPPED repository: no files changed because $($blockers.Count) unsafe transformation(s) require manual review."
+    }
+
+    Write-Host "Summary: $($sourcePlans.Count) manifest file(s), $($kustomizationPlans.Count) kustomization file(s), $($blockers.Count) blocker(s)."
+    return [pscustomobject]@{
+        Repository         = $repo
+        ManifestFiles      = $sourcePlans.Count
+        KustomizationFiles = $kustomizationPlans.Count
+        Blockers           = $blockers.Count
+        Applied            = $applied
     }
 }
 
-Write-Output "Summary: $($sourcePlans.Count) manifest file(s), $($kustomizationPlans.Count) kustomization file(s), $($blockers.Count) blocker(s)."
+function Get-WorkspaceRepositories {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $resolvedWorkspace = (Resolve-Path -LiteralPath $Path).Path
+    $workspaceDirectory = Split-Path -Parent $resolvedWorkspace
+    try {
+        $workspace = [System.IO.File]::ReadAllText($resolvedWorkspace) | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Unable to parse VS Code workspace '$resolvedWorkspace': $($_.Exception.Message)"
+    }
+
+    if ($null -eq $workspace.folders -or @($workspace.folders).Count -eq 0) {
+        throw "VS Code workspace '$resolvedWorkspace' contains no folders."
+    }
+
+    $repositories = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($folder in $workspace.folders) {
+        if ([string]::IsNullOrWhiteSpace($folder.path)) {
+            throw "VS Code workspace '$resolvedWorkspace' contains a folder without a path."
+        }
+
+        $candidate = $folder.path
+        if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+            $candidate = Join-Path -Path $workspaceDirectory -ChildPath $candidate
+        }
+        if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+            throw "Workspace folder does not exist: $candidate"
+        }
+
+        $resolvedRepository = (Resolve-Path -LiteralPath $candidate).Path
+        if ($seen.Add($resolvedRepository)) {
+            $repositories.Add($resolvedRepository)
+        }
+    }
+
+    return $repositories
+}
+
+$repositories = @(
+    if ($PSCmdlet.ParameterSetName -eq 'Workspace') {
+        Get-WorkspaceRepositories -Path $WorkspacePath
+    }
+    else {
+        (Resolve-Path -LiteralPath $RepoPath).Path
+    }
+)
+
+Write-Output "Processing $($repositories.Count) repository folder(s)."
+$results = @(
+    foreach ($repository in $repositories) {
+        Invoke-Repository -Path $repository
+    }
+)
+
+$blockedRepositories = @($results | Where-Object Blockers -gt 0)
+Write-Output ''
+Write-Output "Overall summary: $($results.Count) repository folder(s), $($blockedRepositories.Count) blocked."
+if ($Apply -and $blockedRepositories.Count -gt 0) {
+    throw "$($blockedRepositories.Count) repository folder(s) were skipped because they require manual review."
+}
