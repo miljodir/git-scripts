@@ -1,6 +1,6 @@
-# One-time installation:
-# Install-Module Microsoft.Graph -Scope CurrentUser
-
+# To be used in Microsoft Sentinel watchlist to correlate with Azure AD sign-in logs and other data sources to inspect usage patterns of all service principals
+# Import the CSV file as a Sentinel watchlist with SearchKey "AppId".
+# Note that the Sentinel workbooks support max 50 columns (we currently use 48 columns)
 param(
     [string]$OutputPath = ".\EntraServicePrincipals.csv",
 
