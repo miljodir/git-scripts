@@ -35,6 +35,8 @@ without '--' are unchanged. -Names uses the original Azure names. Existing
 keys are not removed. Requires authenticated Azure CLI and
 Nais CLI; Get-AzSubscription is optional for selecting subscription names.
 Secret values are never passed as command-line arguments or written to files.
+Independent Azure CLI reads run concurrently (-ThrottleLimit, default 8);
+Nais writes run one at a time.
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -44,7 +46,9 @@ param(
     [string[]] $Names,
     [switch] $All,
     [switch] $IncludeVaultName,
-    [switch] $MergeVaults
+    [switch] $MergeVaults,
+    [ValidateRange(1, 32)]
+    [int] $ThrottleLimit = 8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -71,15 +75,35 @@ if (-not $nais) {
     throw 'Nais CLI (nais) is required.'
 }
 
-function Invoke-AzureCli {
-    param([string[]] $Arguments)
+function Invoke-AzureCliBatch {
+    # Runs independent Azure CLI calls concurrently and returns their output in input order.
+    # The first failed call, in input order, is reported as an error.
+    param([object[]] $ArgumentLists)
 
-    $result = & az @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI failed (exit $LASTEXITCODE): $($result -join "`n")"
+    $outputs = [string[]]::new($ArgumentLists.Count)
+    if ($ArgumentLists.Count -eq 0) {
+        return , $outputs
     }
 
-    return ($result -join "`n")
+    $results = [object[]]::new($ArgumentLists.Count)
+    $commands = for ($index = 0; $index -lt $ArgumentLists.Count; $index++) {
+        [pscustomobject]@{ Index = $index; Arguments = [string[]] $ArgumentLists[$index] }
+    }
+
+    $commands | ForEach-Object -ThrottleLimit $ThrottleLimit -Parallel {
+        $arguments = $_.Arguments
+        $result = & az @arguments 2>&1
+        [pscustomobject]@{ Index = $_.Index; ExitCode = $LASTEXITCODE; Output = ($result -join "`n") }
+    } | ForEach-Object { $results[$_.Index] = $_ }
+
+    for ($index = 0; $index -lt $results.Count; $index++) {
+        if ($results[$index].ExitCode -ne 0) {
+            throw "Azure CLI failed (exit $($results[$index].ExitCode)): $($results[$index].Output)"
+        }
+        $outputs[$index] = $results[$index].Output
+    }
+
+    return , $outputs
 }
 
 function Invoke-NaisCli {
@@ -180,12 +204,40 @@ foreach ($subscription in $Subscriptions) {
     if ($subscription -cnotmatch '^([dtp])-([a-z0-9]+(?:-[a-z0-9]+)*)$') {
         throw "Subscription '$subscription' must be named d-<team>, t-<team>, or p-<team>."
     }
+}
+
+# Azure CLI calls are slow to start, so independent reads run concurrently and are processed in order.
+Write-Host "Discovering Key Vaults in subscription(s) $($Subscriptions -join ', ')."
+$vaultsJsonBySubscription = Invoke-AzureCliBatch -ArgumentLists @($Subscriptions | ForEach-Object {
+    , @('keyvault', 'list', '--subscription', $_, '--query', '[].name', '--output', 'json')
+})
+
+$discoveredVaults = [System.Collections.Generic.List[object]]::new()
+for ($subscriptionIndex = 0; $subscriptionIndex -lt $Subscriptions.Count; $subscriptionIndex++) {
+    $subscription = $Subscriptions[$subscriptionIndex]
+    [void] ($subscription -cmatch '^([dtp])-([a-z0-9]+(?:-[a-z0-9]+)*)$')
+    $team = $Matches[2]
+    foreach ($vault in @(ConvertFrom-Json -InputObject $vaultsJsonBySubscription[$subscriptionIndex])) {
+        $discoveredVaults.Add([pscustomobject]@{
+            Subscription = $subscription
+            Vault = $vault
+            Target = Get-TargetName -Subscription $subscription -Vault $vault -Team $team -IncludeVaultName:$IncludeVaultName -MergeVaults:$MergeVaults
+        })
+    }
+}
+
+$namesJsonByVault = Invoke-AzureCliBatch -ArgumentLists @($discoveredVaults | ForEach-Object {
+    , @('keyvault', 'secret', 'list', '--vault-name', $_.Vault, '--subscription', $_.Subscription, '--query', '[].name', '--output', 'json')
+})
+
+$vaultIndex = 0
+for ($subscriptionIndex = 0; $subscriptionIndex -lt $Subscriptions.Count; $subscriptionIndex++) {
+    $subscription = $Subscriptions[$subscriptionIndex]
+    [void] ($subscription -cmatch '^([dtp])-([a-z0-9]+(?:-[a-z0-9]+)*)$')
     $prefix = $Matches[1]
     $team = $Matches[2]
     $environment = if ($prefix -eq 'p') { 'prod' } else { 'dev' }
-    Write-Host "Discovering Key Vaults in subscription '$subscription'."
-    $vaultsJson = Invoke-AzureCli -Arguments @('keyvault', 'list', '--subscription', $subscription, '--query', '[].name', '--output', 'json')
-    $vaults = @(ConvertFrom-Json -InputObject $vaultsJson)
+    $vaults = @(ConvertFrom-Json -InputObject $vaultsJsonBySubscription[$subscriptionIndex])
     if ($vaults.Count -eq 0) {
         Write-Warning "No Key Vaults found in subscription '$subscription'."
         continue
@@ -193,9 +245,9 @@ foreach ($subscription in $Subscriptions) {
 
     $keyOwners = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($vault in $vaults) {
-        $target = Get-TargetName -Subscription $subscription -Vault $vault -Team $team -IncludeVaultName:$IncludeVaultName -MergeVaults:$MergeVaults
-        $namesJson = Invoke-AzureCli -Arguments @('keyvault', 'secret', 'list', '--vault-name', $vault, '--subscription', $subscription, '--query', '[].name', '--output', 'json')
-        $vaultNames = @(ConvertFrom-Json -InputObject $namesJson)
+        $target = $discoveredVaults[$vaultIndex].Target
+        $vaultNames = @(ConvertFrom-Json -InputObject $namesJsonByVault[$vaultIndex])
+        $vaultIndex++
         if ($PSBoundParameters.ContainsKey('Names')) {
             $vaultNames = @($vaultNames | Where-Object { $_ -in $Names })
             foreach ($name in $vaultNames) {
@@ -240,6 +292,26 @@ if ($PSBoundParameters.ContainsKey('Names')) {
     }
 }
 
+$secretRequests = @(foreach ($plan in $plans) {
+    foreach ($name in $plan.Names) {
+        [pscustomobject]@{ Plan = $plan; Name = $name }
+    }
+})
+Write-Host "Reading $($secretRequests.Count) secret value(s) from Azure Key Vault."
+$secretJsonByRequest = Invoke-AzureCliBatch -ArgumentLists @($secretRequests | ForEach-Object {
+    , @('keyvault', 'secret', 'show', '--vault-name', $_.Plan.Vault, '--subscription', $_.Plan.Subscription, '--name', $_.Name, '--output', 'json')
+})
+$secretValues = @{}
+for ($requestIndex = 0; $requestIndex -lt $secretRequests.Count; $requestIndex++) {
+    $request = $secretRequests[$requestIndex]
+    $secret = ConvertFrom-Json -InputObject $secretJsonByRequest[$requestIndex]
+    $secretJsonByRequest[$requestIndex] = $null
+    if ($null -eq $secret.value) {
+        throw "Azure Key Vault returned no value for '$($request.Name)' in '$($request.Plan.Vault)'."
+    }
+    $secretValues["$($request.Plan.Subscription)/$($request.Plan.Vault)/$($request.Name)"] = $secret.value
+}
+
 foreach ($group in ($plans | Group-Object Environment, Team, Target)) {
     $first = $group.Group[0]
     $team = $first.Team
@@ -271,18 +343,12 @@ foreach ($group in ($plans | Group-Object Environment, Team, Target)) {
     $copied = 0
     foreach ($plan in $group.Group) {
         foreach ($name in $plan.Names) {
-            $secretJson = Invoke-AzureCli -Arguments @('keyvault', 'secret', 'show', '--vault-name', $plan.Vault, '--subscription', $plan.Subscription, '--name', $name, '--output', 'json')
-            $secret = ConvertFrom-Json -InputObject $secretJson
-            if ($null -eq $secret.value) {
-                throw "Azure Key Vault returned no value for '$name' in '$($plan.Vault)'."
-            }
-
             $naisKey = $name.Replace('--', '__')
             if ($naisKey -in $existingKeys) {
                 Write-Warning "Key '$naisKey' already exists in '$target'; updating its value."
             }
 
-            Set-NaisValue -Target $target -Team $team -Environment $environment -Key $naisKey -Value $secret.value
+            Set-NaisValue -Target $target -Team $team -Environment $environment -Key $naisKey -Value $secretValues["$($plan.Subscription)/$($plan.Vault)/$name"]
             $copied++
         }
     }
