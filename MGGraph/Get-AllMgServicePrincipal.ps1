@@ -38,38 +38,26 @@ function Format-UtcDate {
     return ([DateTimeOffset]$Value).ToUniversalTime().ToString("o")
 }
 
-function Get-OwnerSummary {
+function ConvertTo-OwnerSummary {
     param(
-        [Parameter(Mandatory)]
-        [ValidateSet("Application", "ServicePrincipal")]
-        [string]$ObjectType,
-
-        [Parameter(Mandatory)]
-        [string]$ObjectId
+        [AllowNull()]
+        [object[]]$Owners
     )
 
-    $owners = if ($ObjectType -eq "Application") {
-        @(Get-MgApplicationOwner -ApplicationId $ObjectId -All)
-    }
-    else {
-        @(Get-MgServicePrincipalOwner -ServicePrincipalId $ObjectId -All)
-    }
+    $ownerDetails = foreach ($owner in @($Owners | Where-Object { $null -ne $_ })) {
+        $odataType = [string]$owner["@odata.type"]
 
-    $ownerDetails = foreach ($owner in $owners) {
-        $properties = $owner.AdditionalProperties
-        $odataType = [string]$properties["@odata.type"]
-
-        $displayName = [string]$properties["displayName"]
+        $displayName = [string]$owner["displayName"]
         if ([string]::IsNullOrWhiteSpace($displayName)) {
-            $displayName = $owner.Id
+            $displayName = [string]$owner["id"]
         }
 
         [pscustomobject]@{
-            Id                = $owner.Id
+            Id                = [string]$owner["id"]
             Type              = $odataType -replace "#microsoft.graph.", ""
             DisplayName       = $displayName
-            UserPrincipalName = [string]$properties["userPrincipalName"]
-            AppId             = [string]$properties["appId"]
+            UserPrincipalName = [string]$owner["userPrincipalName"]
+            AppId             = [string]$owner["appId"]
         }
     }
 
@@ -88,6 +76,95 @@ function Get-OwnerSummary {
             "[]"
         }
     }
+}
+
+function Get-OwnerSummaryMap {
+    # Reads owners with Graph JSON batching (20 requests per call) instead of one call per object.
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("applications", "servicePrincipals")]
+        [string]$Collection,
+
+        [AllowEmptyCollection()]
+        [string[]]$ObjectIds
+    )
+
+    $ownersById = @{}
+    $pending = [System.Collections.Generic.Queue[object]]::new()
+    foreach ($objectId in ($ObjectIds | Sort-Object -Unique)) {
+        $ownersById[$objectId] = [System.Collections.Generic.List[object]]::new()
+        $pending.Enqueue([pscustomobject]@{
+            ObjectId = $objectId
+            Url      = "/$Collection/$objectId/owners"
+            Attempt  = 0
+        })
+    }
+
+    $total = $pending.Count
+    while ($pending.Count -gt 0) {
+        Write-Progress `
+            -Activity "Reading $Collection owners" `
+            -Status "$($total - $pending.Count) of $total" `
+            -PercentComplete ([Math]::Min(100, (($total - $pending.Count) / [Math]::Max(1, $total)) * 100))
+
+        $requests = [ordered]@{}
+        while ($pending.Count -gt 0 -and $requests.Count -lt 20) {
+            $requests[[string]$requests.Count] = $pending.Dequeue()
+        }
+
+        $body = @{
+            requests = @($requests.Keys | ForEach-Object {
+                @{ id = $_; method = "GET"; url = $requests[$_].Url }
+            })
+        } | ConvertTo-Json -Depth 4 -Compress
+        $response = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' -Body $body -ContentType "application/json"
+
+        $retryAfter = 0
+        foreach ($item in $response.responses) {
+            $request = $requests[[string]$item.id]
+            $status = [int]$item.status
+
+            if ($status -eq 200) {
+                foreach ($owner in @($item.body.value)) {
+                    $ownersById[$request.ObjectId].Add($owner)
+                }
+                $nextLink = [string]$item.body["@odata.nextLink"]
+                if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+                    $pending.Enqueue([pscustomobject]@{
+                        ObjectId = $request.ObjectId
+                        Url      = ($nextLink -replace '^https://[^/]+/v1\.0', '')
+                        Attempt  = 0
+                    })
+                }
+            }
+            elseif (($status -eq 429 -or $status -ge 500) -and $request.Attempt -lt 8) {
+                $request.Attempt++
+                $delay = [Math]::Min(60, [Math]::Pow(2, $request.Attempt))
+                if ($null -ne $item.headers -and $item.headers["Retry-After"]) {
+                    $delay = [Math]::Max(1, [int]$item.headers["Retry-After"])
+                }
+                $retryAfter = [Math]::Max($retryAfter, $delay)
+                $pending.Enqueue($request)
+            }
+            else {
+                $message = if ($null -ne $item.body -and $null -ne $item.body["error"]) { $item.body["error"]["message"] } else { "HTTP $status" }
+                throw "Failed to read owners from $($request.Url): $message"
+            }
+        }
+
+        if ($retryAfter -gt 0) {
+            Start-Sleep -Seconds $retryAfter
+        }
+    }
+
+    Write-Progress -Activity "Reading $Collection owners" -Completed
+
+    $summaries = @{}
+    foreach ($objectId in $ownersById.Keys) {
+        $summaries[$objectId] = ConvertTo-OwnerSummary -Owners $ownersById[$objectId].ToArray()
+    }
+
+    return $summaries
 }
 
 function Get-PasswordCredentialSummary {
@@ -353,6 +430,21 @@ if (-not $SkipCreatedByAudit) {
     }
 }
 
+Write-Host "Reading owners..."
+
+$servicePrincipalOwnersById = Get-OwnerSummaryMap `
+    -Collection servicePrincipals `
+    -ObjectIds @($servicePrincipals.Id)
+
+$applicationOwnersById = Get-OwnerSummaryMap `
+    -Collection applications `
+    -ObjectIds @($servicePrincipals | ForEach-Object {
+        if (-not [string]::IsNullOrWhiteSpace($_.AppId) -and
+            $applicationByAppId.ContainsKey($_.AppId.ToLowerInvariant())) {
+            $applicationByAppId[$_.AppId.ToLowerInvariant()].Id
+        }
+    })
+
 $results = [System.Collections.Generic.List[object]]::new()
 $position = 0
 
@@ -374,14 +466,10 @@ foreach ($servicePrincipal in $servicePrincipals) {
         }
     }
 
-    $servicePrincipalOwners = Get-OwnerSummary `
-        -ObjectType ServicePrincipal `
-        -ObjectId $servicePrincipal.Id
+    $servicePrincipalOwners = $servicePrincipalOwnersById[$servicePrincipal.Id]
 
     if ($null -ne $application) {
-        $applicationOwners = Get-OwnerSummary `
-            -ObjectType Application `
-            -ObjectId $application.Id
+        $applicationOwners = $applicationOwnersById[$application.Id]
 
         $applicationSecrets = Get-PasswordCredentialSummary `
             -Credentials $application.PasswordCredentials

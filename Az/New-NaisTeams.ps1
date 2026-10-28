@@ -37,6 +37,7 @@ Authentication:
   https://<ConsoleHost>/graphql. The service account needs the 'Team creator'
   and 'Team owner' roles (see New-NaisServiceAccount.ps1). Teams created this
   way have no human owner.
+Entra ID groups are read concurrently (-ThrottleLimit, default 8).
 Requires authenticated Azure CLI, plus the Nais CLI when -ConsoleHost is not
 used. Supports -WhatIf.
 #>
@@ -46,7 +47,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string[]] $Subscriptions,
     [ValidateNotNullOrEmpty()]
-    [string] $ConsoleHost
+    [string] $ConsoleHost,
+    [ValidateRange(1, 32)]
+    [int] $ThrottleLimit = 8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -71,15 +74,35 @@ if (-not $useServiceAccount) {
     }
 }
 
-function Invoke-AzureCli {
-    param([string[]] $Arguments)
+function Invoke-AzureCliBatch {
+    # Runs independent Azure CLI calls concurrently and returns their output in input order.
+    # The first failed call, in input order, is reported as an error.
+    param([object[]] $ArgumentLists)
 
-    $result = & az @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI failed (exit $LASTEXITCODE): $($result -join "`n")"
+    $outputs = [string[]]::new($ArgumentLists.Count)
+    if ($ArgumentLists.Count -eq 0) {
+        return , $outputs
     }
 
-    return ($result -join "`n")
+    $results = [object[]]::new($ArgumentLists.Count)
+    $commands = for ($index = 0; $index -lt $ArgumentLists.Count; $index++) {
+        [pscustomobject]@{ Index = $index; Arguments = [string[]] $ArgumentLists[$index] }
+    }
+
+    $commands | ForEach-Object -ThrottleLimit $ThrottleLimit -Parallel {
+        $arguments = $_.Arguments
+        $result = & az @arguments 2>&1
+        [pscustomobject]@{ Index = $_.Index; ExitCode = $LASTEXITCODE; Output = ($result -join "`n") }
+    } | ForEach-Object { $results[$_.Index] = $_ }
+
+    for ($index = 0; $index -lt $results.Count; $index++) {
+        if ($results[$index].ExitCode -ne 0) {
+            throw "Azure CLI failed (exit $($results[$index].ExitCode)): $($results[$index].Output)"
+        }
+        $outputs[$index] = $results[$index].Output
+    }
+
+    return , $outputs
 }
 
 function Get-FreePort {
@@ -192,6 +215,7 @@ function Get-NaisTeamMemberEmails {
 }
 
 $teams = [ordered]@{}
+$groupReads = [System.Collections.Generic.List[object]]::new()
 foreach ($subscription in $Subscriptions) {
     if ($subscription -cnotmatch '^[dtp]-([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$') {
         throw "Subscription '$subscription' must be named d-<team>, t-<team>, or p-<team>."
@@ -216,10 +240,20 @@ foreach ($subscription in $Subscriptions) {
         continue
     }
     $teams[$team].Groups.Add($group)
+    $groupReads.Add([pscustomobject]@{ Team = $team; Group = $group })
+}
 
-    Write-Host "Reading members of Entra ID group '$group'."
-    $membersJson = Invoke-AzureCli -Arguments @('ad', 'group', 'member', 'list', '--group', $group, '--output', 'json')
-    foreach ($member in @(ConvertFrom-Json -InputObject $membersJson)) {
+foreach ($groupRead in $groupReads) {
+    Write-Host "Reading members of Entra ID group '$($groupRead.Group)'."
+}
+$membersJsonByGroup = Invoke-AzureCliBatch -ArgumentLists @($groupReads | ForEach-Object {
+    , @('ad', 'group', 'member', 'list', '--group', $_.Group, '--output', 'json')
+})
+
+for ($groupIndex = 0; $groupIndex -lt $groupReads.Count; $groupIndex++) {
+    $team = $groupReads[$groupIndex].Team
+    $group = $groupReads[$groupIndex].Group
+    foreach ($member in @(ConvertFrom-Json -InputObject $membersJsonByGroup[$groupIndex])) {
         if ($member.'@odata.type' -ne '#microsoft.graph.user') {
             Write-Warning "Skipping non-user member '$($member.displayName)' ($($member.'@odata.type')) of '$group'."
             continue

@@ -1,3 +1,4 @@
+#requires -Version 7.0
 <#
 .SYNOPSIS
 Deletes ACR manifests that are not used by the configured AKS clusters.
@@ -10,6 +11,13 @@ Repositories are only cleaned when their owning Kubernetes namespace exists in
 at least one configured context, unless a repository-to-namespace mapping exists.
 Deletion is disabled by default; pass -EnableDelete to actually remove
 manifests.
+
+For performance, kubectl reads run concurrently, and manifest listing and
+deletion call the ACR data-plane REST API directly over a pooled HTTP client
+instead of starting one az process per repository or manifest. Azure CLI is
+only used to resolve the registry and to get a single Entra ID token, which is
+exchanged for short-lived, repository-scoped ACR tokens. Throttled (429) and
+transient failures are retried with backoff.
 
 .EXAMPLE
 .\Cleanup-AzAcrImage.ps1 -RegistryName myacr -AksResourceGroup my-rg
@@ -25,7 +33,7 @@ Kubernetes contexts.
 .EXAMPLE
 .\Cleanup-AzAcrImage.ps1 -SkipAksCredentials -EnableDelete -DeleteThrottleLimit 12
 
-Deletes unused manifests with up to 12 concurrent az delete operations.
+Deletes unused manifests with up to 12 concurrent delete requests.
 
 .EXAMPLE
 .\Cleanup-AzAcrImage.ps1 -SkipAksCredentials -IncludeRepositoryPrefix avdekl,testteam1
@@ -72,7 +80,15 @@ param(
     [int] $DeleteThrottleLimit = 8,
 
     [Parameter(Mandatory = $false)]
-    [switch] $SkipAksCredentials
+    [ValidateRange(1, 64)]
+    [int] $ListThrottleLimit = 16,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $SkipAksCredentials,
+
+    # Overrides the registry data-plane base URI. Used by tests.
+    [Parameter(Mandatory = $false, DontShow = $true)]
+    [string] $RegistryEndpoint
 )
 
 function Assert-CommandExists {
@@ -120,24 +136,673 @@ function Invoke-JsonCommand {
     return $json | ConvertFrom-Json -ErrorAction Stop
 }
 
-function Invoke-AcrRepositoryDelete {
+function Start-NativeProcess {
     param(
         [Parameter(Mandatory = $true)]
-        [string] $RegistryName,
+        [string] $FilePath,
 
         [Parameter(Mandatory = $true)]
-        [string] $ImageName
+        [string[]] $ArgumentList
     )
 
-    [void] (Invoke-NativeCommand `
-        -Command { az acr repository delete --name $RegistryName --image $ImageName --yes --output none } `
-        -ErrorMessage "Failed to delete image '$ImageName'.")
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+    foreach ($argument in $ArgumentList) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+
+    return [pscustomobject]@{
+        Process        = $process
+        StandardOutput = $process.StandardOutput.ReadToEndAsync()
+        StandardError  = $process.StandardError.ReadToEndAsync()
+        Exited         = $process.WaitForExitAsync()
+    }
 }
 
-function Invoke-ParallelAcrRepositoryDelete {
+function Invoke-NativeCommandBatch {
+    <#
+    Runs native commands concurrently and returns a hashtable of Key -> standard output.
+    Each command is an object with Key, FilePath, ArgumentList and ErrorMessage properties.
+    #>
     param(
         [Parameter(Mandatory = $true)]
-        [string] $RegistryName,
+        [AllowEmptyCollection()]
+        [object[]] $Commands,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 64)]
+        [int] $ThrottleLimit
+    )
+
+    $results = @{}
+    $pending = [System.Collections.Generic.Queue[object]]::new()
+    $running = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($command in $Commands) {
+        $pending.Enqueue($command)
+    }
+
+    try {
+        while ($pending.Count -gt 0 -or $running.Count -gt 0) {
+            while ($running.Count -lt $ThrottleLimit -and $pending.Count -gt 0) {
+                $command = $pending.Dequeue()
+                $running.Add([pscustomobject]@{
+                    Command = $command
+                    Started = Start-NativeProcess -FilePath $command.FilePath -ArgumentList $command.ArgumentList
+                })
+            }
+
+            $tasks = [System.Threading.Tasks.Task[]]::new($running.Count)
+            for ($index = 0; $index -lt $running.Count; $index++) {
+                $tasks[$index] = $running[$index].Started.Exited
+            }
+
+            # A timeout keeps the loop responsive to Ctrl+C.
+            $completedIndex = [System.Threading.Tasks.Task]::WaitAny($tasks, 500)
+            if ($completedIndex -lt 0) {
+                continue
+            }
+
+            $entry = $running[$completedIndex]
+            $running.RemoveAt($completedIndex)
+
+            $standardOutput = $entry.Started.StandardOutput.GetAwaiter().GetResult()
+            $standardError = $entry.Started.StandardError.GetAwaiter().GetResult()
+            $exitCode = $entry.Started.Process.ExitCode
+            $entry.Started.Process.Dispose()
+
+            if ($exitCode -ne 0) {
+                throw "$($entry.Command.ErrorMessage) Exit code: $exitCode. $($standardError.Trim())"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($standardError)) {
+                Write-Warning "$($entry.Command.Key): $($standardError.Trim())"
+            }
+
+            $results[$entry.Command.Key] = $standardOutput
+        }
+    }
+    finally {
+        foreach ($entry in $running) {
+            if (-not $entry.Started.Process.HasExited) {
+                $entry.Started.Process.Kill($true)
+            }
+
+            $entry.Started.Process.Dispose()
+        }
+    }
+
+    return $results
+}
+
+function ConvertFrom-JsonText {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [AllowNull()]
+        [string] $Json
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Json)) {
+        return $null
+    }
+
+    return ConvertFrom-Json -InputObject $Json -ErrorAction Stop
+}
+
+function ConvertFrom-JwtExpiry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Token
+    )
+
+    try {
+        $payload = $Token.Split(".")[1].Replace("-", "+").Replace("_", "/")
+        switch ($payload.Length % 4) {
+            2 { $payload += "==" }
+            3 { $payload += "=" }
+        }
+
+        $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+        if ($claims.exp) {
+            return [DateTimeOffset]::FromUnixTimeSeconds([long] $claims.exp)
+        }
+    }
+    catch {
+        Write-Verbose "Could not read token expiry: $($_.Exception.Message)"
+    }
+
+    return [DateTimeOffset]::UtcNow.AddMinutes(10)
+}
+
+function New-AcrClient {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $LoginServer,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Endpoint,
+
+        [Parameter(Mandatory = $true)]
+        [int] $MaxConnections
+    )
+
+    $handler = [System.Net.Http.SocketsHttpHandler]::new()
+    $handler.MaxConnectionsPerServer = $MaxConnections
+    $handler.PooledConnectionLifetime = [TimeSpan]::FromMinutes(5)
+    $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::All
+
+    $httpClient = [System.Net.Http.HttpClient]::new($handler)
+    $httpClient.Timeout = [TimeSpan]::FromSeconds(100)
+
+    return [pscustomobject]@{
+        LoginServer           = $LoginServer
+        Endpoint              = $Endpoint.TrimEnd("/")
+        HttpClient            = $httpClient
+        RefreshToken          = $null
+        RefreshTokenExpiresOn = [DateTimeOffset]::MinValue
+        AccessTokens          = @{}
+    }
+}
+
+function New-AcrFormRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Path,
+
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $Form
+    )
+
+    $pairs = [System.Collections.Generic.List[System.Collections.Generic.KeyValuePair[string, string]]]::new()
+    foreach ($key in $Form.Keys) {
+        $pairs.Add([System.Collections.Generic.KeyValuePair[string, string]]::new($key, [string] $Form[$key]))
+    }
+
+    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, "$($Client.Endpoint)$Path")
+    $request.Content = [System.Net.Http.FormUrlEncodedContent]::new($pairs)
+    return $request
+}
+
+function Update-AcrRefreshToken {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client
+    )
+
+    Write-Host "Exchanging an Entra ID token for an ACR refresh token for '$($Client.LoginServer)'..."
+
+    $aadToken = Invoke-JsonCommand `
+        -Command { az account get-access-token --resource "https://containerregistry.azure.net" --output json } `
+        -ErrorMessage "Failed to get an Entra ID access token for Azure Container Registry."
+
+    if (-not $aadToken -or [string]::IsNullOrWhiteSpace($aadToken.accessToken)) {
+        throw "Azure CLI did not return an access token for Azure Container Registry."
+    }
+
+    $form = [ordered]@{
+        grant_type   = "access_token"
+        service      = $Client.LoginServer
+        access_token = $aadToken.accessToken
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($aadToken.tenant)) {
+        $form.tenant = $aadToken.tenant
+    }
+
+    $request = New-AcrFormRequest -Client $Client -Path "/oauth2/exchange" -Form $form
+    try {
+        $response = $Client.HttpClient.SendAsync($request).GetAwaiter().GetResult()
+        try {
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if (-not $response.IsSuccessStatusCode) {
+                throw "Failed to exchange the Entra ID token for an ACR refresh token. HTTP $([int] $response.StatusCode): $body"
+            }
+
+            $refreshToken = (ConvertFrom-JsonText -Json $body).refresh_token
+        }
+        finally {
+            $response.Dispose()
+        }
+    }
+    finally {
+        $request.Dispose()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($refreshToken)) {
+        throw "The ACR token exchange did not return a refresh token."
+    }
+
+    $Client.RefreshToken = $refreshToken
+    $Client.RefreshTokenExpiresOn = ConvertFrom-JwtExpiry -Token $refreshToken
+    $Client.AccessTokens.Clear()
+}
+
+function Get-AcrCachedAccessToken {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Scope
+    )
+
+    $cachedToken = $Client.AccessTokens[$Scope]
+    if ($null -ne $cachedToken -and $cachedToken.ExpiresOn -gt [DateTimeOffset]::UtcNow.AddMinutes(2)) {
+        return $cachedToken.Token
+    }
+
+    return $null
+}
+
+function Start-AcrAccessTokenRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Scope
+    )
+
+    if ($Client.RefreshTokenExpiresOn -le [DateTimeOffset]::UtcNow.AddMinutes(5)) {
+        Update-AcrRefreshToken -Client $Client
+    }
+
+    $request = New-AcrFormRequest -Client $Client -Path "/oauth2/token" -Form ([ordered]@{
+        grant_type    = "refresh_token"
+        service       = $Client.LoginServer
+        scope         = $Scope
+        refresh_token = $Client.RefreshToken
+    })
+
+    return [pscustomobject]@{
+        Kind    = "Token"
+        Scope   = $Scope
+        Request = $request
+        Task    = $Client.HttpClient.SendAsync($request)
+    }
+}
+
+function New-AcrOperation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Method,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Path,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Scope,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Repository,
+
+        [Parameter(Mandatory = $false)]
+        [string] $Label,
+
+        [Parameter(Mandatory = $false)]
+        [int[]] $AcceptedStatusCodes = @()
+    )
+
+    return [pscustomobject]@{
+        Method              = $Method
+        Path                = $Path
+        Scope               = $Scope
+        Repository          = $Repository
+        Label               = $Label
+        AcceptedStatusCodes = $AcceptedStatusCodes
+        Attempts            = 0
+        AuthRetries         = 0
+        NotBefore           = [DateTimeOffset]::MinValue
+    }
+}
+
+function Get-RetryAfterDelay {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [System.Net.Http.HttpResponseMessage] $Response
+    )
+
+    if ($null -eq $Response -or $null -eq $Response.Headers.RetryAfter) {
+        return $null
+    }
+
+    if ($null -ne $Response.Headers.RetryAfter.Delta) {
+        return $Response.Headers.RetryAfter.Delta.Value
+    }
+
+    if ($null -ne $Response.Headers.RetryAfter.Date) {
+        return $Response.Headers.RetryAfter.Date.Value - [DateTimeOffset]::UtcNow
+    }
+
+    return $null
+}
+
+function Get-NextLinkPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.Http.HttpResponseMessage] $Response
+    )
+
+    $values = $null
+    if (-not $Response.Headers.TryGetValues("Link", [ref] $values)) {
+        return $null
+    }
+
+    foreach ($value in $values) {
+        if ($value -match '<([^>]+)>\s*;\s*rel="?next"?') {
+            $link = $Matches[1]
+            if ($link -match "^https?://") {
+                return ([uri] $link).PathAndQuery
+            }
+
+            return $link
+        }
+    }
+
+    return $null
+}
+
+function Invoke-AcrRequestQueue {
+    <#
+    Sends ACR data-plane requests with at most ThrottleLimit requests in flight.
+    Repository-scoped ACR access tokens are requested on demand and cached.
+    Throttled (429), transient (5xx, network) and expired-token (401) responses are retried.
+    OnSuccess receives (operation, statusCode, body, response) and may return follow-up operations.
+    Returns the list of operations that failed permanently.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]] $Operations,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 64)]
+        [int] $ThrottleLimit,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock] $OnSuccess,
+
+        [Parameter(Mandatory = $false)]
+        [int] $MaxAttempts = 8
+    )
+
+    $transientStatusCodes = @(0, 408, 429, 500, 502, 503, 504)
+    $ready = [System.Collections.Generic.Queue[object]]::new()
+    $delayed = [System.Collections.Generic.List[object]]::new()
+    $inFlight = [System.Collections.Generic.List[object]]::new()
+    $waitingForToken = @{}
+    $failures = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($operation in $Operations) {
+        $ready.Enqueue($operation)
+    }
+
+    $registerFailure = {
+        param($FailedOperation, [int] $StatusCode, [string] $Message, $RetryAfter)
+
+        if ($StatusCode -eq 401 -and $FailedOperation.AuthRetries -lt 1) {
+            $FailedOperation.AuthRetries++
+            $ready.Enqueue($FailedOperation)
+            return
+        }
+
+        $FailedOperation.Attempts++
+        if ($transientStatusCodes -contains $StatusCode -and $FailedOperation.Attempts -lt $MaxAttempts) {
+            $delay = if ($null -ne $RetryAfter -and $RetryAfter -gt [TimeSpan]::Zero) {
+                $RetryAfter
+            }
+            else {
+                [TimeSpan]::FromSeconds([Math]::Min(60, [Math]::Pow(2, $FailedOperation.Attempts)))
+            }
+
+            $delay = $delay + [TimeSpan]::FromMilliseconds((Get-Random -Minimum 0 -Maximum 1000))
+            $FailedOperation.NotBefore = [DateTimeOffset]::UtcNow + $delay
+            Write-Verbose "Retrying $($FailedOperation.Method) $($FailedOperation.Path) in $([int] $delay.TotalSeconds)s (attempt $($FailedOperation.Attempts)/$MaxAttempts): $Message"
+            $delayed.Add($FailedOperation)
+            return
+        }
+
+        $failures.Add([pscustomobject]@{
+            Operation  = $FailedOperation
+            StatusCode = $StatusCode
+            Message    = $Message
+        })
+    }
+
+    try {
+        while ($ready.Count -gt 0 -or $delayed.Count -gt 0 -or $inFlight.Count -gt 0) {
+            $now = [DateTimeOffset]::UtcNow
+            for ($index = $delayed.Count - 1; $index -ge 0; $index--) {
+                if ($delayed[$index].NotBefore -le $now) {
+                    $ready.Enqueue($delayed[$index])
+                    $delayed.RemoveAt($index)
+                }
+            }
+
+            while ($inFlight.Count -lt $ThrottleLimit -and $ready.Count -gt 0) {
+                $operation = $ready.Dequeue()
+                $token = Get-AcrCachedAccessToken -Client $Client -Scope $operation.Scope
+
+                if ($token) {
+                    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::new($operation.Method), "$($Client.Endpoint)$($operation.Path)")
+                    $request.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new("Bearer", $token)
+                    $inFlight.Add([pscustomobject]@{
+                        Kind      = "Operation"
+                        Operation = $operation
+                        Request   = $request
+                        Task      = $Client.HttpClient.SendAsync($request)
+                    })
+                    continue
+                }
+
+                if (-not $waitingForToken.ContainsKey($operation.Scope)) {
+                    $waitingForToken[$operation.Scope] = [System.Collections.Generic.List[object]]::new()
+                    $inFlight.Add((Start-AcrAccessTokenRequest -Client $Client -Scope $operation.Scope))
+                }
+
+                $waitingForToken[$operation.Scope].Add($operation)
+            }
+
+            if ($inFlight.Count -eq 0) {
+                if ($delayed.Count -gt 0) {
+                    $earliest = $delayed[0].NotBefore
+                    foreach ($delayedOperation in $delayed) {
+                        if ($delayedOperation.NotBefore -lt $earliest) {
+                            $earliest = $delayedOperation.NotBefore
+                        }
+                    }
+
+                    $sleepMilliseconds = [Math]::Max(10, [Math]::Min(1000, ($earliest - [DateTimeOffset]::UtcNow).TotalMilliseconds))
+                    Start-Sleep -Milliseconds ([int] $sleepMilliseconds)
+                }
+
+                continue
+            }
+
+            $tasks = [System.Threading.Tasks.Task[]]::new($inFlight.Count)
+            for ($index = 0; $index -lt $inFlight.Count; $index++) {
+                $tasks[$index] = $inFlight[$index].Task
+            }
+
+            # A timeout keeps the loop responsive to Ctrl+C and lets delayed retries mature.
+            $completedIndex = [System.Threading.Tasks.Task]::WaitAny($tasks, 250)
+            if ($completedIndex -lt 0) {
+                continue
+            }
+
+            $entry = $inFlight[$completedIndex]
+            $inFlight.RemoveAt($completedIndex)
+
+            $response = $null
+            $statusCode = 0
+            $body = $null
+            $message = $null
+
+            try {
+                $response = $entry.Task.GetAwaiter().GetResult()
+                $statusCode = [int] $response.StatusCode
+                $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            }
+            catch {
+                $message = $_.Exception.Message
+            }
+            finally {
+                $entry.Request.Dispose()
+            }
+
+            try {
+                if (-not $message) {
+                    $message = "HTTP $statusCode"
+                    if (-not [string]::IsNullOrWhiteSpace($body)) {
+                        $message += ": $($body.Substring(0, [Math]::Min(500, $body.Length)))"
+                    }
+                }
+
+                $retryAfter = Get-RetryAfterDelay -Response $response
+
+                if ($entry.Kind -eq "Token") {
+                    $waitingOperations = $waitingForToken[$entry.Scope]
+                    $waitingForToken.Remove($entry.Scope)
+
+                    $accessToken = $null
+                    if ($statusCode -eq 200) {
+                        $accessToken = (ConvertFrom-JsonText -Json $body).access_token
+                    }
+
+                    if (-not [string]::IsNullOrWhiteSpace($accessToken)) {
+                        $Client.AccessTokens[$entry.Scope] = [pscustomobject]@{
+                            Token     = $accessToken
+                            ExpiresOn = ConvertFrom-JwtExpiry -Token $accessToken
+                        }
+
+                        foreach ($waitingOperation in $waitingOperations) {
+                            $ready.Enqueue($waitingOperation)
+                        }
+                    }
+                    else {
+                        if ($statusCode -eq 401) {
+                            $Client.RefreshTokenExpiresOn = [DateTimeOffset]::MinValue
+                        }
+
+                        foreach ($waitingOperation in $waitingOperations) {
+                            & $registerFailure $waitingOperation $statusCode "ACR token request for scope '$($entry.Scope)' failed: $message" $retryAfter
+                        }
+                    }
+
+                    continue
+                }
+
+                $operation = $entry.Operation
+                if (($statusCode -ge 200 -and $statusCode -lt 300) -or $operation.AcceptedStatusCodes -contains $statusCode) {
+                    foreach ($followUp in @(& $OnSuccess $operation $statusCode $body $response)) {
+                        if ($null -ne $followUp) {
+                            $ready.Enqueue($followUp)
+                        }
+                    }
+
+                    continue
+                }
+
+                if ($statusCode -eq 401) {
+                    $Client.AccessTokens.Remove($operation.Scope)
+                }
+
+                & $registerFailure $operation $statusCode $message $retryAfter
+            }
+            finally {
+                if ($null -ne $response) {
+                    $response.Dispose()
+                }
+            }
+        }
+    }
+    finally {
+        foreach ($entry in $inFlight) {
+            $entry.Request.Dispose()
+        }
+    }
+
+    return , $failures
+}
+
+function Get-AcrManifestMetadata {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]] $Repositories,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 64)]
+        [int] $ThrottleLimit
+    )
+
+    $manifestsByRepository = @{}
+    $listProgress = [pscustomobject]@{ Completed = 0; Total = $Repositories.Count }
+    $listOperations = foreach ($repository in $Repositories) {
+        $manifestsByRepository[$repository] = [System.Collections.Generic.List[object]]::new()
+        New-AcrOperation -Method "GET" -Path "/acr/v1/$repository/_manifests?n=1000&orderby=timeasc" -Scope "repository:$($repository):metadata_read" -Repository $repository -AcceptedStatusCodes @(404)
+    }
+
+    Write-Host "Fetching manifest metadata for $($Repositories.Count) repositories with up to $ThrottleLimit concurrent request(s)..."
+
+    $listFailures = Invoke-AcrRequestQueue -Client $Client -Operations @($listOperations) -ThrottleLimit $ThrottleLimit -OnSuccess {
+        param($Operation, $StatusCode, $Body, $Response)
+
+        if ($StatusCode -eq 404) {
+            Write-Warning "Repository '$($Operation.Repository)' was not found while listing manifests. Treating it as empty."
+        }
+        else {
+            $page = ConvertFrom-JsonText -Json $Body
+            foreach ($manifest in @($page.manifests)) {
+                if ($null -ne $manifest) {
+                    $manifestsByRepository[$Operation.Repository].Add($manifest)
+                }
+            }
+
+            $nextPath = Get-NextLinkPath -Response $Response
+            if ($nextPath) {
+                return New-AcrOperation -Method "GET" -Path $nextPath -Scope $Operation.Scope -Repository $Operation.Repository -AcceptedStatusCodes @(404)
+            }
+        }
+
+        $listProgress.Completed++
+        Write-Host "[$($listProgress.Completed)/$($listProgress.Total)] Fetched $($manifestsByRepository[$Operation.Repository].Count) manifest(s) for $($Operation.Repository)."
+    }
+
+    if ($listFailures.Count -gt 0) {
+        foreach ($failure in $listFailures) {
+            Write-Error "Failed to list manifests for repository '$($failure.Operation.Repository)': $($failure.Message)"
+        }
+
+        throw "Failed to list manifests for $(@($listFailures | ForEach-Object { $_.Operation.Repository } | Sort-Object -Unique).Count) repositories."
+    }
+
+    return $manifestsByRepository
+}
+
+function Remove-AcrManifest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Client,
 
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
@@ -152,63 +817,31 @@ function Invoke-ParallelAcrRepositoryDelete {
         return 0
     }
 
-    if ($ThrottleLimit -eq 1 -or $PSVersionTable.PSVersion.Major -lt 7) {
-        if ($ThrottleLimit -gt 1 -and $PSVersionTable.PSVersion.Major -lt 7) {
-            Write-Warning "Parallel deletes require PowerShell 7 or newer. Falling back to sequential deletes."
-        }
+    Write-Host "Deleting $($ImageNames.Count) manifest(s) with up to $ThrottleLimit concurrent delete request(s)..."
 
-        $deletedCount = 0
-
-        foreach ($imageName in $ImageNames) {
-            $repositoryName = @($imageName -split "@")[0]
-            Write-Host "Deleting $($deletedCount + 1)/$($ImageNames.Count): $repositoryName"
-            Invoke-AcrRepositoryDelete -RegistryName $RegistryName -ImageName $imageName
-            $deletedCount++
-            Write-Host "Deleted $deletedCount/$($ImageNames.Count): $repositoryName"
-        }
-
-        return $deletedCount
+    $deleteProgress = [pscustomobject]@{ Completed = 0; Total = $ImageNames.Count }
+    $deleteOperations = foreach ($imageName in $ImageNames) {
+        $repository, $digest = $imageName -split "@", 2
+        New-AcrOperation -Method "DELETE" -Path "/v2/$repository/manifests/$digest" -Scope "repository:$($repository):delete" -Repository $repository -Label $imageName -AcceptedStatusCodes @(404)
     }
 
-    Write-Host "Deleting $($ImageNames.Count) manifest(s) with up to $ThrottleLimit concurrent az delete operation(s)..."
+    $deleteFailures = Invoke-AcrRequestQueue -Client $Client -Operations @($deleteOperations) -ThrottleLimit $ThrottleLimit -OnSuccess {
+        param($Operation, $StatusCode, $Body, $Response)
 
-    $totalImageCount = $ImageNames.Count
-    $deleteItems = for ($index = 0; $index -lt $totalImageCount; $index++) {
-        [pscustomobject]@{
-            Index      = $index + 1
-            ImageName  = $ImageNames[$index]
-            Repository = @($ImageNames[$index] -split "@")[0]
+        $deleteProgress.Completed++
+        if ($StatusCode -eq 404) {
+            Write-Warning "Manifest $($Operation.Label) was already deleted."
         }
+
+        Write-Host "Deleted $($deleteProgress.Completed)/$($deleteProgress.Total): $($Operation.Label)"
     }
 
-    $deleteResults = $deleteItems | ForEach-Object -Parallel {
-        $deleteItem = $_
-        $imageName = $deleteItem.ImageName
-
-        Write-Host "Deleting $($deleteItem.Index)/$($using:totalImageCount): $($deleteItem.Repository)"
-        $output = & az acr repository delete --name $using:RegistryName --image $imageName --yes --output none 2>&1
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Deleted $($deleteItem.Index)/$($using:totalImageCount): $($deleteItem.Repository)"
+    if ($deleteFailures.Count -gt 0) {
+        foreach ($failedDelete in $deleteFailures) {
+            Write-Error "Failed to delete $($failedDelete.Operation.Label): $($failedDelete.Message)"
         }
 
-        [pscustomobject]@{
-            ImageName   = $imageName
-            Repository  = $deleteItem.Repository
-            DeleteIndex = $deleteItem.Index
-            ExitCode    = $LASTEXITCODE
-            Output      = ($output -join [Environment]::NewLine)
-        }
-    } -ThrottleLimit $ThrottleLimit
-
-    $failedDeletes = @($deleteResults | Where-Object { $_.ExitCode -ne 0 })
-
-    if ($failedDeletes.Count -gt 0) {
-        foreach ($failedDelete in $failedDeletes) {
-            Write-Error "Failed to delete from $($failedDelete.Repository): $($failedDelete.Output)"
-        }
-
-        throw "Failed to delete $($failedDeletes.Count) of $($ImageNames.Count) manifest(s)."
+        throw "Failed to delete $($deleteFailures.Count) of $($ImageNames.Count) manifest(s)."
     }
 
     return $ImageNames.Count
@@ -494,11 +1127,131 @@ function Add-UsedImageReference {
     }
 }
 
-function Add-ImageReferencesFromObject {
+if (-not ("AcrCleanup.KubernetesImageScanner" -as [type])) {
+    # Scanning large kubectl JSON documents node by node in PowerShell takes minutes; this helper takes milliseconds.
+    Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+
+namespace AcrCleanup
+{
+    public sealed class KubernetesImageScanResult
+    {
+        public string[] Images { get; set; }
+        public int ItemCount { get; set; }
+        public int SkippedDeepNodeCount { get; set; }
+    }
+
+    public static class KubernetesImageScanner
+    {
+        public static KubernetesImageScanResult Scan(string json, int maxDepth)
+        {
+            var images = new HashSet<string>(StringComparer.Ordinal);
+            var result = new KubernetesImageScanResult();
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                result.Images = new string[0];
+                return result;
+            }
+
+            using (var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 4096 }))
+            {
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    JsonElement items;
+                    if (root.TryGetProperty("items", out items) && items.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in items.EnumerateArray())
+                        {
+                            if (item.ValueKind != JsonValueKind.Null)
+                            {
+                                result.ItemCount++;
+                            }
+                        }
+                    }
+                }
+
+                var stack = new Stack<KeyValuePair<JsonElement, int>>();
+                stack.Push(new KeyValuePair<JsonElement, int>(root, 0));
+
+                while (stack.Count > 0)
+                {
+                    var entry = stack.Pop();
+                    var node = entry.Key;
+                    var depth = entry.Value;
+
+                    if (node.ValueKind != JsonValueKind.Object && node.ValueKind != JsonValueKind.Array)
+                    {
+                        continue;
+                    }
+
+                    if (depth > maxDepth)
+                    {
+                        result.SkippedDeepNodeCount++;
+                        continue;
+                    }
+
+                    if (node.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var child in node.EnumerateArray())
+                        {
+                            stack.Push(new KeyValuePair<JsonElement, int>(child, depth + 1));
+                        }
+
+                        continue;
+                    }
+
+                    foreach (var property in node.EnumerateObject())
+                    {
+                        var name = property.Name;
+                        if (name.Equals("metadata", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("apiVersion", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("kind", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var value = property.Value;
+                        if (value.ValueKind == JsonValueKind.String)
+                        {
+                            if (name.Equals("image", StringComparison.OrdinalIgnoreCase) ||
+                                name.Equals("imageID", StringComparison.OrdinalIgnoreCase))
+                            {
+                                images.Add(value.GetString());
+                            }
+                        }
+                        else
+                        {
+                            stack.Push(new KeyValuePair<JsonElement, int>(value, depth + 1));
+                        }
+                    }
+                }
+            }
+
+            var imageArray = new string[images.Count];
+            images.CopyTo(imageArray);
+            result.Images = imageArray;
+            return result;
+        }
+    }
+}
+"@
+}
+
+function Add-ImageReferencesFromJson {
+    <#
+    Collects image and imageID values from kubectl JSON output. Like the previous object walk,
+    metadata, apiVersion and kind properties are skipped and nesting deeper than 50 levels is ignored.
+    Returns the number of Kubernetes resources in the document.
+    #>
     param(
         [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
         [AllowNull()]
-        [object] $InputObject,
+        [string] $Json,
 
         [Parameter(Mandatory = $true)]
         [string] $LoginServer,
@@ -515,59 +1268,22 @@ function Add-ImageReferencesFromObject {
         [hashtable] $UsedTagContexts,
 
         [Parameter(Mandatory = $false)]
-        [string] $ContextName,
-
-        [Parameter(Mandatory = $false)]
-        [int] $Depth = 0
+        [string] $ContextName
     )
 
-    if ($null -eq $InputObject -or $InputObject -is [string]) {
-        return
+    $scanResult = [AcrCleanup.KubernetesImageScanner]::Scan($Json, 50)
+
+    if ($scanResult.SkippedDeepNodeCount -gt 0) {
+        Write-Warning "Skipped $($scanResult.SkippedDeepNodeCount) Kubernetes object node(s) nested deeper than 50 levels while scanning for image references."
     }
 
-    if ($Depth -gt 50) {
-        Write-Warning "Skipping image-reference scan below depth $Depth to avoid recursive object traversal."
-        return
+    foreach ($image in $scanResult.Images) {
+        Add-UsedImageReference -Image $image -LoginServer $LoginServer -UsedTags $UsedTags -UsedDigests $UsedDigests -UsedTagContexts $UsedTagContexts -ContextName $ContextName
     }
 
-    if ($InputObject -is [System.Collections.IDictionary]) {
-        foreach ($key in $InputObject.Keys) {
-            $value = $InputObject[$key]
-
-            if ($key -eq "image" -or $key -eq "imageID") {
-                Add-UsedImageReference -Image $value -LoginServer $LoginServer -UsedTags $UsedTags -UsedDigests $UsedDigests -UsedTagContexts $UsedTagContexts -ContextName $ContextName
-            }
-
-            Add-ImageReferencesFromObject -InputObject $value -LoginServer $LoginServer -UsedTags $UsedTags -UsedDigests $UsedDigests -UsedTagContexts $UsedTagContexts -ContextName $ContextName -Depth ($Depth + 1)
-        }
-
-        return
-    }
-
-    if ($InputObject -is [System.Collections.IEnumerable]) {
-        foreach ($item in $InputObject) {
-            Add-ImageReferencesFromObject -InputObject $item -LoginServer $LoginServer -UsedTags $UsedTags -UsedDigests $UsedDigests -UsedTagContexts $UsedTagContexts -ContextName $ContextName -Depth ($Depth + 1)
-        }
-
-        return
-    }
-
-    foreach ($property in $InputObject.PSObject.Properties) {
-        if ($property.MemberType -ne [System.Management.Automation.PSMemberTypes]::NoteProperty) {
-            continue
-        }
-
-        if ($property.Name -eq "metadata" -or $property.Name -eq "apiVersion" -or $property.Name -eq "kind") {
-            continue
-        }
-
-        if ($property.Name -eq "image" -or $property.Name -eq "imageID") {
-            Add-UsedImageReference -Image $property.Value -LoginServer $LoginServer -UsedTags $UsedTags -UsedDigests $UsedDigests -UsedTagContexts $UsedTagContexts -ContextName $ContextName
-        }
-
-        Add-ImageReferencesFromObject -InputObject $property.Value -LoginServer $LoginServer -UsedTags $UsedTags -UsedDigests $UsedDigests -UsedTagContexts $UsedTagContexts -ContextName $ContextName -Depth ($Depth + 1)
-    }
+    return $scanResult.ItemCount
 }
+
 
 Assert-CommandExists -Name "az"
 Assert-CommandExists -Name "kubectl"
@@ -638,33 +1354,47 @@ else {
     Write-Host "No include prefixes configured. Kubernetes scan will read all namespaces."
 }
 
-foreach ($context in $normalizedKubeContexts) {
-    $kubectlArguments = @()
-    if (-not [string]::IsNullOrWhiteSpace($context)) {
-        $kubectlArguments += @("--context", $context)
+$kubectlPath = (Get-Command kubectl -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$kubectlThrottleLimit = [Math]::Min($ListThrottleLimit, 8)
+
+function Get-KubectlContextArgument {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string] $Context
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Context)) {
+        return @("--context", $Context)
     }
 
-    Write-Host "Reading Kubernetes resources from context '$context'..."
+    return @()
+}
 
-    Write-Host "Listing namespaces in context '$context'..."
-    $namespaceResources = Invoke-JsonCommand `
-        -Command { kubectl @kubectlArguments get namespaces --output json } `
-        -ErrorMessage "Failed to list namespaces from context '$context'."
+Write-Host "Listing namespaces in context(s) $($normalizedKubeContexts -join ', ') concurrently..."
+$namespaceCommands = foreach ($context in $normalizedKubeContexts) {
+    [pscustomobject]@{
+        Key          = $context
+        FilePath     = $kubectlPath
+        ArgumentList = @(Get-KubectlContextArgument -Context $context) + @("get", "namespaces", "--output", "json")
+        ErrorMessage = "Failed to list namespaces from context '$context'."
+    }
+}
 
+$namespaceOutputs = Invoke-NativeCommandBatch -Commands @($namespaceCommands) -ThrottleLimit $kubectlThrottleLimit
+$resourceCommands = [System.Collections.Generic.List[object]]::new()
+
+foreach ($context in $normalizedKubeContexts) {
+    $namespaceResources = ConvertFrom-JsonText -Json $namespaceOutputs[$context]
     $namespacesInContext = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($namespaceResource in @($namespaceResources.items)) {
-        if (-not [string]::IsNullOrWhiteSpace($namespaceResource.metadata.name)) {
+        if ($null -ne $namespaceResource -and -not [string]::IsNullOrWhiteSpace($namespaceResource.metadata.name)) {
             [void] $namespacesInContext.Add($namespaceResource.metadata.name)
         }
     }
 
     $namespacesByContext[$context] = $namespacesInContext
     Write-Host "Found $($namespacesInContext.Count) namespace(s) in context '$context'."
-
-    $tagsBeforeContext = $usedTags.Count
-    $digestsBeforeContext = $usedDigests.Count
-    $resourcesScannedInContext = 0
-    $namespacesFoundInContext = 0
 
     if ($kubernetesNamespacesToScan.Count -gt 0) {
         foreach ($namespace in $kubernetesNamespacesToScan) {
@@ -673,34 +1403,52 @@ foreach ($context in $normalizedKubeContexts) {
                 continue
             }
 
-            $namespacesFoundInContext++
-            Write-Host "Reading Kubernetes resources from context '$context', namespace '$namespace'..."
-
-            $kubernetesResources = Invoke-JsonCommand `
-                -Command { kubectl @kubectlArguments --namespace $namespace get $resourceKinds --output json } `
-                -ErrorMessage "Failed to read Kubernetes resources from context '$context', namespace '$namespace'."
-
-            $kubernetesResourceCount = @($kubernetesResources.items).Count
-            $resourcesScannedInContext += $kubernetesResourceCount
-
-            Write-Host "Scanning $kubernetesResourceCount Kubernetes resource(s) in context '$context', namespace '$namespace' for '$loginServer' image references..."
-            Add-ImageReferencesFromObject -InputObject $kubernetesResources -LoginServer $loginServer -UsedTags $usedTags -UsedDigests $usedDigests -UsedTagContexts $usedTagContexts -ContextName $context
+            $resourceCommands.Add([pscustomobject]@{
+                Key          = "$context/$namespace"
+                Context      = $context
+                Namespace    = $namespace
+                FilePath     = $kubectlPath
+                ArgumentList = @(Get-KubectlContextArgument -Context $context) + @("--namespace", $namespace, "get", $resourceKinds, "--output", "json")
+                ErrorMessage = "Failed to read Kubernetes resources from context '$context', namespace '$namespace'."
+            })
         }
     }
     else {
-        $kubernetesResources = Invoke-JsonCommand `
-            -Command { kubectl @kubectlArguments get $resourceKinds --all-namespaces --output json } `
-            -ErrorMessage "Failed to read Kubernetes resources from context '$context'."
+        $resourceCommands.Add([pscustomobject]@{
+            Key          = "$context/"
+            Context      = $context
+            Namespace    = $null
+            FilePath     = $kubectlPath
+            ArgumentList = @(Get-KubectlContextArgument -Context $context) + @("get", $resourceKinds, "--all-namespaces", "--output", "json")
+            ErrorMessage = "Failed to read Kubernetes resources from context '$context'."
+        })
+    }
+}
 
-        $kubernetesResourceCount = @($kubernetesResources.items).Count
+Write-Host "Reading Kubernetes resources with $($resourceCommands.Count) concurrent kubectl request(s) (up to $kubectlThrottleLimit at a time)..."
+$resourceOutputs = Invoke-NativeCommandBatch -Commands $resourceCommands.ToArray() -ThrottleLimit $kubectlThrottleLimit
+
+foreach ($context in $normalizedKubeContexts) {
+    $tagsBeforeContext = $usedTags.Count
+    $digestsBeforeContext = $usedDigests.Count
+    $resourcesScannedInContext = 0
+    $contextCommands = @($resourceCommands | Where-Object { $_.Context -eq $context })
+
+    foreach ($resourceCommand in $contextCommands) {
+        $kubernetesResourceCount = Add-ImageReferencesFromJson -Json $resourceOutputs[$resourceCommand.Key] -LoginServer $loginServer -UsedTags $usedTags -UsedDigests $usedDigests -UsedTagContexts $usedTagContexts -ContextName $context
+        $resourceOutputs.Remove($resourceCommand.Key)
         $resourcesScannedInContext += $kubernetesResourceCount
 
-        Write-Host "Scanning $kubernetesResourceCount Kubernetes resource(s) in context '$context' for '$loginServer' image references..."
-        Add-ImageReferencesFromObject -InputObject $kubernetesResources -LoginServer $loginServer -UsedTags $usedTags -UsedDigests $usedDigests -UsedTagContexts $usedTagContexts -ContextName $context
+        if ($resourceCommand.Namespace) {
+            Write-Host "Scanned $kubernetesResourceCount Kubernetes resource(s) in context '$context', namespace '$($resourceCommand.Namespace)' for '$loginServer' image references."
+        }
+        else {
+            Write-Host "Scanned $kubernetesResourceCount Kubernetes resource(s) in context '$context' for '$loginServer' image references."
+        }
     }
 
     if ($kubernetesNamespacesToScan.Count -gt 0) {
-        Write-Host "Context '$context' scanned $resourcesScannedInContext resource(s) in $namespacesFoundInContext/$($kubernetesNamespacesToScan.Count) requested namespace(s), adding $($usedTags.Count - $tagsBeforeContext) new tag reference(s) and $($usedDigests.Count - $digestsBeforeContext) new digest reference(s)."
+        Write-Host "Context '$context' scanned $resourcesScannedInContext resource(s) in $($contextCommands.Count)/$($kubernetesNamespacesToScan.Count) requested namespace(s), adding $($usedTags.Count - $tagsBeforeContext) new tag reference(s) and $($usedDigests.Count - $digestsBeforeContext) new digest reference(s)."
     }
     else {
         Write-Host "Context '$context' added $($usedTags.Count - $tagsBeforeContext) new tag reference(s) and $($usedDigests.Count - $digestsBeforeContext) new digest reference(s)."
@@ -815,9 +1563,34 @@ if ($usedTags.Count -gt $usedTagsForCleanup.Count) {
     Write-Host "$($usedTags.Count - $usedTagsForCleanup.Count) tag reference(s) were found outside the cleanup repository scope and do not affect this run."
 }
 
+$usedTagNamesByRepository = @{}
+foreach ($tagReference in $usedTagsForCleanup) {
+    $separatorIndex = $tagReference.LastIndexOf(":")
+    $tagRepository = $tagReference.Substring(0, $separatorIndex).ToLowerInvariant()
+    if (-not $usedTagNamesByRepository.ContainsKey($tagRepository)) {
+        $usedTagNamesByRepository[$tagRepository] = [System.Collections.Generic.List[string]]::new()
+    }
+
+    $usedTagNamesByRepository[$tagRepository].Add($tagReference.Substring($separatorIndex + 1))
+}
+
+$usedDigestCountByRepository = @{}
+foreach ($digestReference in $usedDigestsForCleanup) {
+    $digestRepository = $digestReference.Substring(0, $digestReference.IndexOf("@")).ToLowerInvariant()
+    $usedDigestCountByRepository[$digestRepository] = 1 + [int] $usedDigestCountByRepository[$digestRepository]
+}
+
 $totalDeleteCandidates = 0
 $approvedImagesToDelete = [System.Collections.Generic.List[string]]::new()
 $repositoryIndex = 0
+$acrClient = $null
+$manifestsByRepository = @{}
+
+if ($repositoriesToProcess.Count -gt 0) {
+    $acrEndpoint = if ([string]::IsNullOrWhiteSpace($RegistryEndpoint)) { "https://$loginServer" } else { $RegistryEndpoint }
+    $acrClient = New-AcrClient -LoginServer $loginServer -Endpoint $acrEndpoint -MaxConnections ([Math]::Max($ListThrottleLimit, $DeleteThrottleLimit))
+    $manifestsByRepository = Get-AcrManifestMetadata -Client $acrClient -Repositories $repositoriesToProcess -ThrottleLimit $ListThrottleLimit
+}
 
 foreach ($repository in $repositoriesToProcess) {
     $repositoryIndex++
@@ -829,24 +1602,18 @@ foreach ($repository in $repositoriesToProcess) {
         Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Repository is eligible through $mappingLabel '$($namespaceInfo.Namespace)' in context(s): $($namespaceInfo.Contexts -join ', ')."
     }
 
-    Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Fetching manifest metadata for $repository..."
-
-    $manifests = Invoke-JsonCommand `
-        -Command { az acr manifest list-metadata --registry $RegistryName --name $repository --orderby time_asc --output json } `
-        -ErrorMessage "Failed to list manifests for repository '$repository'."
-
-    $imagesToDelete = @()
+    $manifests = $manifestsByRepository[$repository]
+    $imagesToDelete = [System.Collections.Generic.List[object]]::new()
     $protectedByLatestCount = 0
     $protectedByDigestCount = 0
     $protectedByTagCount = 0
     $usedTagsProtectedByLatest = [System.Collections.Generic.List[string]]::new()
     $manifestCount = @($manifests).Count
-    $tagPrefix = "$($repository):"
-    $digestPrefix = "$repository@"
-    $usedTagNamesForRepository = @($usedTagsForCleanup | Where-Object { $_.StartsWith($tagPrefix, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Substring($tagPrefix.Length) })
-    $usedDigestsForRepository = @($usedDigestsForCleanup | Where-Object { $_.StartsWith($digestPrefix, [System.StringComparison]::OrdinalIgnoreCase) })
+    $repositoryKey = $repository.ToLowerInvariant()
+    $usedTagNamesForRepository = @($usedTagNamesByRepository[$repositoryKey] | Where-Object { $null -ne $_ })
+    $usedDigestCountForRepository = [int] $usedDigestCountByRepository[$repositoryKey]
 
-    Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Kubernetes references for $($repository): $($usedTagNamesForRepository.Count) tag(s), $($usedDigestsForRepository.Count) digest(s)."
+    Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Kubernetes references for $($repository): $($usedTagNamesForRepository.Count) tag(s), $usedDigestCountForRepository digest(s)."
     Write-Host "[$repositoryIndex/$($repositoriesToProcess.Count)] Evaluating $manifestCount manifest(s) in $repository..."
 
     foreach ($manifest in @($manifests)) {
@@ -857,11 +1624,11 @@ foreach ($repository in $repositoriesToProcess) {
         }
 
         $manifestTags = @($manifest.tags | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        $usedTagsOnManifest = @()
+        $usedTagsOnManifest = [System.Collections.Generic.List[string]]::new()
 
         foreach ($tag in $manifestTags) {
             if ($usedTagsForCleanup.Contains("$($repository):$tag")) {
-                $usedTagsOnManifest += $tag
+                $usedTagsOnManifest.Add($tag)
             }
         }
 
@@ -900,7 +1667,7 @@ foreach ($repository in $repositoriesToProcess) {
         }
 
         if (-not $hasUsedTag) {
-            $imagesToDelete += $manifest
+            $imagesToDelete.Add($manifest)
         }
     }
 
@@ -942,7 +1709,11 @@ foreach ($repository in $repositoriesToProcess) {
 }
 
 if ($EnableDelete) {
-    $deletedCount = Invoke-ParallelAcrRepositoryDelete -RegistryName $RegistryName -ImageNames $approvedImagesToDelete.ToArray() -ThrottleLimit $DeleteThrottleLimit
+    $deletedCount = 0
+    if ($approvedImagesToDelete.Count -gt 0) {
+        $deletedCount = Remove-AcrManifest -Client $acrClient -ImageNames $approvedImagesToDelete.ToArray() -ThrottleLimit $DeleteThrottleLimit
+    }
+
     Write-Host "Deleted $deletedCount of $totalDeleteCandidates unused image manifest(s) from registry '$RegistryName'." -ForegroundColor Green
 }
 else {

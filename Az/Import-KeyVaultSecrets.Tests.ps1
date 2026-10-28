@@ -14,8 +14,15 @@ using System.Text.Json;
 public class Stub {
     public static int Main(string[] args) {
         string program = Path.GetFileNameWithoutExtension(Environment.ProcessPath);
-        File.AppendAllText(Environment.GetEnvironmentVariable("IMPORT_TEST_LOG"),
-            program + " " + string.Join(" ", args) + Environment.NewLine);
+        for (int attempt = 0; ; attempt++) {
+            try {
+                File.AppendAllText(Environment.GetEnvironmentVariable("IMPORT_TEST_LOG"),
+                    program + " " + string.Join(" ", args) + Environment.NewLine);
+                break;
+            } catch (IOException) when (attempt < 100) {
+                System.Threading.Thread.Sleep(10);
+            }
+        }
         string operation = string.Join(" ", args.Take(3));
         string Get(string flag) => args[Array.IndexOf(args, flag) + 1];
         string scenario = Environment.GetEnvironmentVariable("IMPORT_TEST_SCENARIO");
@@ -76,7 +83,7 @@ public class Stub {
 }
 '@
     Set-Content (Join-Path $stubDir 'Stub.cs') $source
-    Set-Content (Join-Path $stubDir 'Stub.csproj') '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>'
+    Set-Content (Join-Path $stubDir 'Stub.csproj') '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><RollForward>Major</RollForward></PropertyGroup></Project>'
     & dotnet build (Join-Path $stubDir 'Stub.csproj') -o (Join-Path $stubDir 'out') --nologo --verbosity quiet
     if ($LASTEXITCODE -ne 0) {
         throw 'Failed to build the CLI fixtures.'
